@@ -6,38 +6,15 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-// we keep the props you were already passing from financial.js
-// so financial.js does NOT need to change.
-export default function FinancialHeader({
-  profile: profileFromPage,
-  onSignOut,
-  allowedLocations,
-  location,
-  setLocation,
-  period,
-  setPeriod,
-  PERIODS,
-}) {
+export default function FinancialHeader() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // We’re going to align with the portal header behavior:
-  // it fetches a lightweight profile itself for display in the bar.
-  // BUT we also accept profileFromPage from financial.js and prefer that if present,
-  // so we don't flicker.
-  const [profileLoaded, setProfileLoaded] = useState(
-    !!profileFromPage
-  );
-  const [profile, setProfile] = useState(profileFromPage || null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [profile, setProfile] = useState(null);
 
-  // Load profile if not provided yet
+  // This mirrors the portal header logic
   useEffect(() => {
-    if (profileFromPage) {
-      setProfile(profileFromPage);
-      setProfileLoaded(true);
-      return;
-    }
-
     (async () => {
       try {
         const { data: authData } = await supabase.auth.getUser();
@@ -54,14 +31,14 @@ export default function FinancialHeader({
           .eq("id", user.id)
           .limit(1);
 
+        // fallback profile if not found
         const prof =
-          profRows?.[0] ??
-          ({
+          profRows?.[0] ?? {
             id: user.id,
             full_name: user.email ?? null,
             role: "user",
             home_location: null,
-          });
+          };
 
         setProfile(prof);
       } catch {
@@ -70,29 +47,20 @@ export default function FinancialHeader({
         setProfileLoaded(true);
       }
     })();
-  }, [profileFromPage]);
+  }, []);
 
   async function handleLogout() {
-    // use the passed onSignOut if available (financial.js signs out & pushes /login)
-    if (onSignOut) {
-      await onSignOut();
-      return;
-    }
-    // fallback: behave like portal header
     await supabase.auth.signOut();
     router.push("/login");
   }
 
-  // role to decide Admin Panel pill
-  const roleForUi = profile?.role || "";
   const showAdminPill =
-    roleForUi === "admin" && pathname !== "/admin";
+    profile?.role === "admin" && pathname !== "/admin";
 
   return (
-    <header className="w-full bg-white/90 backdrop-blur-sm border-b sticky top-0 z-50">
-      {/* ROW 1: matches the company portal header bar */}
+    <header className="w-full border-b bg-white/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3 md:py-4">
-        {/* Left: Logo + portal name -> link to "/" */}
+        {/* LEFT: Logo + portal name */}
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
             <Image
@@ -113,10 +81,11 @@ export default function FinancialHeader({
           </Link>
         </div>
 
-        {/* Right: user info / admin pill / logout */}
+        {/* RIGHT: Admin Panel pill / user block / logout */}
         <div className="flex items-center gap-3 text-sm">
           {profileLoaded && profile ? (
             <>
+              {/* Admin Panel pill (only if admin and not on /admin) */}
               {showAdminPill && (
                 <Link
                   href="/admin"
@@ -126,6 +95,7 @@ export default function FinancialHeader({
                 </Link>
               )}
 
+              {/* Name + role */}
               <div className="text-right leading-tight hidden sm:block">
                 <div className="text-gray-900 font-medium text-[13px] truncate max-w-[140px]">
                   {profile.full_name || "User"}
@@ -135,6 +105,7 @@ export default function FinancialHeader({
                 </div>
               </div>
 
+              {/* Logout button */}
               <button
                 onClick={handleLogout}
                 className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
@@ -143,6 +114,7 @@ export default function FinancialHeader({
               </button>
             </>
           ) : profileLoaded && !profile ? (
+            // not logged in
             <Link
               href="/login"
               className="rounded-md bg-blue-600 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-blue-700 transition"
@@ -150,47 +122,9 @@ export default function FinancialHeader({
               Sign in
             </Link>
           ) : (
+            // loading shimmer
             <div className="h-[30px] w-[80px] bg-gray-200 rounded animate-pulse" />
           )}
-        </div>
-      </div>
-
-      {/* ROW 2: Financial controls (location/brand + period) */}
-      <div className="max-w-7xl mx-auto px-4 pb-4 flex flex-col md:flex-row md:items-end gap-4 md:gap-8">
-        {/* Location / Brand selector */}
-        <div className="flex flex-col">
-          <label className="text-[12px] font-semibold text-gray-700 mb-1">
-            Select Location / Brand
-          </label>
-          <select
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white text-gray-800 shadow-sm min-w-[220px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {allowedLocations?.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc === "GroupOverview" ? "Group Overview" : loc}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Period selector */}
-        <div className="flex flex-col">
-          <label className="text-[12px] font-semibold text-gray-700 mb-1">
-            Select Period
-          </label>
-          <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white text-gray-800 shadow-sm min-w-[140px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {PERIODS?.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
     </header>
