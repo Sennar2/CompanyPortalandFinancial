@@ -2,22 +2,19 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../src/lib/supabaseClient";
 import { CSVLink } from "react-csv";
-
-// Components we already have
-
-// components live in src/components/financial/
-import FinancialFooter from "../../src/components/financial/FinancialFooter";
+import InsightsBar from "../../src/components/financial/InsightsBar";
+import ComplianceBar from "../../src/components/financial/ComplianceBar";
 import RankingTable from "../../src/components/financial/RankingTable";
 import KPIBlock from "../../src/components/financial/KPIBlock";
 import ChartSection from "../../src/components/financial/ChartSection";
-import ComplianceBar from "../../src/components/financial/ComplianceBar";
-import InsightsBar from "../../src/components/financial/InsightsBar";
+import FinancialFooter from "../../src/components/financial/FinancialFooter";
 
-// if you're still using FinancialHeader from this folder, import it too:
-import FinancialHeader from "../../src/components/financial/FinancialHeader";
+// targets
+const PAYROLL_TARGET = 35; // %
+const FOOD_TARGET = 12.5; // %
+const DRINK_TARGET = 5.5; // %
 
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
@@ -58,40 +55,132 @@ const STORE_LOCATIONS = [
 const PERIODS = ["Week", "Period", "Quarter"];
 const TABS = ["Sales", "Payroll", "Food", "Drink"];
 
-const PAYROLL_TARGET = 35; // %
-const FOOD_TARGET = 12.5; // %
-const DRINK_TARGET = 5.5; // %
+// ─────────────────────────
+// helpers
+// ─────────────────────────
 
+// convert "W43" → 43
 function parseWeekNum(weekStr: any) {
   const num = parseInt(String(weekStr || "").replace(/[^\d]/g, ""), 10);
   return isNaN(num) ? 0 : num;
 }
 
-function getCurrentWeekNumber() {
-  const now = new Date();
-  const tmp = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+// ISO week for “today”
+function getISOWeek(date = new Date()) {
+  const d = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
   );
-  const day = tmp.getUTCDay() || 7;
-  tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-  const diffDays = (tmp.getTime() - yearStart.getTime()) / 86400000 + 1;
-  let w = Math.ceil(diffDays / 7);
-  if (w > 52) w = 52;
-  return w;
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return weekNo > 52 ? 52 : weekNo;
+}
+function getCurrentWeekLabel() {
+  return `W${getISOWeek(new Date())}`;
 }
 
+// sheet parsing
+function parseSheetValues(values: any[][] | undefined) {
+  if (!values || values.length < 2) return [];
+  const [headers, ...rows] = values;
+  return rows.map((row) =>
+    headers.reduce((obj: any, key: string, idx: number) => {
+      let value = row[idx];
+      if (key === "LocationBreakdown" && typeof value === "string") {
+        try {
+          value = JSON.parse(value);
+        } catch {
+          value = {};
+        }
+      } else if (!isNaN(value)) {
+        value = Number(value);
+      }
+      obj[key] = value;
+      return obj;
+    }, {})
+  );
+}
+
+// fetch one tab
+async function fetchTab(tabName: string) {
+  const range = `${tabName}!A1:Z100`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(
+    range
+  )}?key=${API_KEY}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} loading "${tabName}"`);
+  }
+  const json = await res.json();
+  return parseSheetValues(json.values);
+}
+
+// rollup multiple sites into brand totals per week
+function rollupBy(rowsArr: any[], bucketKey: string) {
+  if (!rowsArr.length) return [];
+  const grouped: Record<string, any[]> = {};
+  for (const row of rowsArr) {
+    const key = String(row[bucketKey]).trim();
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(row);
+  }
+  const numericKeys = Object.keys(rowsArr[0]).filter(
+    (k) => typeof rowsArr[0][k] === "number"
+  );
+  const merged = Object.entries(grouped).map(([label, groupRows]) => {
+    const totals: Record<string, number> = {};
+    numericKeys.forEach((nk) => {
+      totals[nk] = groupRows.reduce((sum, r) => sum + (r[nk] || 0), 0);
+    });
+    return {
+      ...totals,
+      [bucketKey]: label,
+    };
+  });
+  if (bucketKey === "Week") {
+    merged.sort((a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week));
+  }
+  return merged;
+}
+
+// exactly like we used: map W# -> Period + Quarter
+function buildWeekToPeriodQuarter() {
+  return Array.from({ length: 52 }, (_, i) => {
+    const w = i + 1;
+    let periodVal;
+    let quarter;
+    if (w <= 13) {
+      quarter = "Q1";
+      periodVal = w <= 4 ? "P1" : w <= 8 ? "P2" : "P3";
+    } else if (w <= 26) {
+      quarter = "Q2";
+      periodVal = w <= 17 ? "P4" : w <= 21 ? "P5" : "P6";
+    } else if (w <= 39) {
+      quarter = "Q3";
+      periodVal = w <= 30 ? "P7" : w <= 34 ? "P8" : "P9";
+    } else {
+      quarter = "Q4";
+      periodVal = w <= 43 ? "P10" : w <= 47 ? "P11" : "P12";
+    }
+    return { week: `W${w}`, period: periodVal, quarter };
+  });
+}
+
+// find last “completed” week with data and build insights object
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
 
+  // decorate with numeric week
   const decorated = rows.map((r) => ({
     ...r,
     __weekNum: parseWeekNum(r.Week),
   }));
 
-  const currentWeekNum = getCurrentWeekNumber();
-  const snapshotWeekNum =
-    currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
+  // choose snapshot week = (currentISOWeek - 1)
+  const currentWeekNum = getISOWeek(new Date());
+  const snapshotWeekNum = currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
   function rowHasData(r: any) {
     return (
@@ -101,10 +190,12 @@ function computeInsightsBundle(rows: any[]) {
     );
   }
 
+  // prefer exact snapshot week with data
   let latestRow = decorated.find(
     (r) => r.__weekNum === snapshotWeekNum && rowHasData(r)
   );
 
+  // fallback: most recent <= snapshotWeekNum with data
   if (!latestRow) {
     const cands = decorated
       .filter((r) => r.__weekNum <= snapshotWeekNum && rowHasData(r))
@@ -112,6 +203,7 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = cands[cands.length - 1];
   }
 
+  // final fallback: any row with data
   if (!latestRow) {
     const cands = decorated
       .filter((r) => rowHasData(r))
@@ -119,11 +211,14 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = cands[cands.length - 1];
   }
 
-  if (!latestRow) return null;
+  if (!latestRow) {
+    return null;
+  }
 
   const usedWeekNum = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${usedWeekNum}`;
 
+  // last 4-week avg for Payroll_v%
   const windowWeeks = [
     usedWeekNum,
     usedWeekNum - 1,
@@ -138,18 +233,12 @@ function computeInsightsBundle(rows: any[]) {
     return Number.isNaN(num) ? 0 : num;
   }
 
-  const last4Rows = decorated.filter((r) =>
-    windowWeeks.includes(r.__weekNum)
-  );
-
-  const payrollTrendVals = last4Rows.map((row) =>
-    parsePayrollVar(row["Payroll_v%"])
-  );
+  const last4Rows = decorated.filter((r) => windowWeeks.includes(r.__weekNum));
+  const payrollTrendVals = last4Rows.map((row) => parsePayrollVar(row["Payroll_v%"]));
 
   const avgPayrollVar4w =
     payrollTrendVals.length > 0
-      ? payrollTrendVals.reduce((s, n) => s + n, 0) /
-        payrollTrendVals.length
+      ? payrollTrendVals.reduce((sum, n) => sum + n, 0) / payrollTrendVals.length
       : 0;
 
   const salesActual = latestRow.Sales_Actual || 0;
@@ -191,169 +280,71 @@ function computeInsightsBundle(rows: any[]) {
     drinkPct,
     salesVsLastYearPct,
     avgPayrollVar4w,
-    currentWeekLabel: `W${getCurrentWeekNumber()}`,
+    currentWeekLabel: getCurrentWeekLabel(),
   };
 }
 
-async function fetchTabFromSheet(tabName: string) {
-  const range = `${tabName}!A1:Z100`;
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(
-    range
-  )}?key=${API_KEY}`;
+// figure out allowed locations by role
+function computeAllowedLocationsForProfile(profile: any) {
+  if (!profile) return [];
+  const roleLower = (profile.role || "").toLowerCase();
+  const home = profile.home_location;
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} loading "${tabName}"`);
-  }
-  const json = await res.json();
-
-  const values = json.values;
-  if (!values || values.length < 2) return [];
-
-  const [headers, ...rows] = values;
-  return rows.map((row: any[]) =>
-    headers.reduce((obj: any, key: string, idx: number) => {
-      let value = row[idx];
-      if (key === "LocationBreakdown" && typeof value === "string") {
-        try {
-          value = JSON.parse(value);
-        } catch {
-          value = {};
-        }
-      } else if (!isNaN(value)) {
-        value = Number(value);
-      }
-      obj[key] = value;
-      return obj;
-    }, {})
-  );
-}
-
-function rollupByWeek(rowsArray: any[]) {
-  if (!rowsArray.length) return [];
-  const grouped: Record<string, any[]> = {};
-
-  for (const row of rowsArray) {
-    const w = String(row.Week || "").trim();
-    if (!grouped[w]) grouped[w] = [];
-    grouped[w].push(row);
+  if (roleLower === "admin" || roleLower === "operation" || roleLower === "ops") {
+    return [
+      "GroupOverview",
+      "La Mia Mamma (Brand)",
+      "Fish and Bubbles (Brand)",
+      "Made in Italy (Brand)",
+      ...STORE_LOCATIONS,
+    ];
   }
 
-  const numericKeys = Object.keys(rowsArray[0]).filter(
-    (k) => typeof rowsArray[0][k] === "number"
-  );
+  if (roleLower === "manager") {
+    return [home];
+  }
 
-  const merged = Object.entries(grouped).map(([weekLabel, rows]) => {
-    const totals: Record<string, number> = {};
-    numericKeys.forEach((col) => {
-      totals[col] = rows.reduce((sum, r) => sum + (r[col] || 0), 0);
-    });
-    return {
-      Week: weekLabel,
-      ...totals,
-    };
-  });
-
-  merged.sort(
-    (a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
-  );
-
-  return merged;
+  // fallback, just in case
+  return [home].filter(Boolean);
 }
 
-function FinancialHeaderInline({
-  profile,
-  onSignOut,
-}: {
-  profile: any;
-  onSignOut: () => void;
-}) {
-  return (
-    <header className="w-full border-b bg-white sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-start md:justify-between px-4 py-4 gap-4">
-        {/* LEFT: logo + portal label */}
-        <div className="flex items-start gap-3">
-          <Link href="/" className="flex items-start gap-2">
-            <Image
-              src="/logo.png"
-              alt="La Mia Mamma"
-              width={48}
-              height={48}
-              className="object-contain"
-            />
-            <div className="leading-tight text-gray-900">
-              <div className="text-sm font-semibold text-gray-900">
-                La Mia Mamma Portal
-              </div>
-              <div className="text-[11px] text-gray-500">
-                Staff Access
-              </div>
-            </div>
-          </Link>
-        </div>
-
-        {/* RIGHT: role, name, admin link, logout */}
-        <div className="flex flex-col items-start md:items-end text-sm text-gray-800">
-          {profile?.role === "admin" && (
-            <Link
-              href="/admin"
-              className="inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition mb-1"
-            >
-              Admin Panel
-            </Link>
-          )}
-
-          <div className="leading-tight text-right">
-            <div className="text-gray-900 font-medium text-[13px] truncate max-w-[160px]">
-              {profile?.full_name || "User"}
-            </div>
-            <div className="text-[11px] text-gray-500 uppercase tracking-wide">
-              {profile?.role || ""}
-            </div>
-          </div>
-
-          <button
-            onClick={onSignOut}
-            className="mt-2 inline-block rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
-          >
-            Log out
-          </button>
-        </div>
-      </div>
-    </header>
-  );
-}
+// ─────────────────────────
+// main component
+// ─────────────────────────
 
 export default function FinancialPage() {
-  // auth state
+  // auth
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // access control
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
-  const [initialLocation, setInitialLocation] = useState("");
+  const [initialLocation, setInitialLocation] = useState<string>("");
 
-  // dashboard state
-  const [location, setLocation] = useState("");
+  // ui state
+  const [location, setLocation] = useState<string>("");
+  const [period, setPeriod] = useState<string>("Week");
+  const [activeTab, setActiveTab] = useState<string>("Sales");
+
+  // data state
   const [rawRows, setRawRows] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState("Sales");
-  const [period, setPeriod] = useState("Week");
   const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [rankingData, setRankingData] = useState<any[]>([]);
 
-  const [currentWeekNow] = useState(`W${getCurrentWeekNumber()}`);
+  const [currentWeekNow] = useState(getCurrentWeekLabel());
 
+  // get session + stay in sync
   useEffect(() => {
     let sub: any;
-    (async () => {
+    async function init() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
       setSession(session);
 
-      const { data: listener } = supabase.auth.onAuthStateChange(
+      const { data: listener } = await supabase.auth.onAuthStateChange(
         (_event, newSession) => {
           setSession(newSession);
           if (!newSession) {
@@ -364,22 +355,23 @@ export default function FinancialPage() {
         }
       );
       sub = listener;
-    })();
+    }
+    init();
 
     return () => {
       if (sub) sub.subscription.unsubscribe();
     };
   }, []);
 
+  // load profile row from Supabase
   useEffect(() => {
-    (async () => {
+    async function loadProfile() {
       if (!session) {
         setAuthLoading(false);
         return;
       }
 
       setAuthLoading(true);
-
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, role, home_location")
@@ -387,6 +379,7 @@ export default function FinancialPage() {
         .single();
 
       if (error) {
+        console.error("profile load error", error);
         setProfile(null);
         setAllowedLocations([]);
         setInitialLocation("");
@@ -396,114 +389,38 @@ export default function FinancialPage() {
 
       setProfile(data);
 
-      // derive what this user can see
-      const roleLower = (data.role || "").toLowerCase();
-      if (roleLower === "admin" || roleLower === "operation") {
-        const locs = [
-          "GroupOverview",
-          "La Mia Mamma (Brand)",
-          "Fish and Bubbles (Brand)",
-          "Made in Italy (Brand)",
-          "La Mia Mamma - Chelsea",
-          "La Mia Mamma - Hollywood Road",
-          "La Mia Mamma - Notting Hill",
-          "La Mia Mamma - Battersea",
-          "Fish and Bubbles - Fulham",
-          "Fish and Bubbles - Notting Hill",
-          "Made in Italy - Chelsea",
-          "Made in Italy - Battersea",
-        ];
-        setAllowedLocations(locs);
-        setInitialLocation(locs[0] || "");
-      } else if (roleLower === "manager") {
-        const only = data.home_location;
-        setAllowedLocations([only]);
-        setInitialLocation(only);
-      } else {
-        setAllowedLocations([]);
-        setInitialLocation("");
-      }
+      const locs = computeAllowedLocationsForProfile(data);
+      setAllowedLocations(locs);
+      setInitialLocation(locs[0] || "");
 
       setAuthLoading(false);
-    })();
+    }
+
+    loadProfile();
   }, [session]);
 
   const roleLower = (profile?.role || "").toLowerCase();
   const canViewFinance =
     roleLower === "admin" ||
     roleLower === "operation" ||
+    roleLower === "ops" ||
     roleLower === "manager";
 
   async function handleSignOut() {
     await supabase.auth.signOut();
   }
 
-  // default first location once loaded
+  // pick default location once allowedLocations are known
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // build W->Period/Quarter mapping
-  const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
-    return Array.from({ length: 52 }, (_, i) => {
-      const w = i + 1;
-      let per;
-      let q;
-      if (w <= 13) {
-        q = "Q1";
-        per = w <= 4 ? "P1" : w <= 8 ? "P2" : "P3";
-      } else if (w <= 26) {
-        q = "Q2";
-        per = w <= 17 ? "P4" : w <= 21 ? "P5" : "P6";
-      } else if (w <= 39) {
-        q = "Q3";
-        per = w <= 30 ? "P7" : w <= 34 ? "P8" : "P9";
-      } else {
-        q = "Q4";
-        per = w <= 43 ? "P10" : w <= 47 ? "P11" : "P12";
-      }
-      return { week: `W${w}`, period: per, quarter: q };
-    });
-  }, []);
+  // Week -> Period,Quarter map
+  const WEEK_TO_PERIOD_QUARTER = useMemo(buildWeekToPeriodQuarter, []);
 
-  // load sheet data for current location/brand
-  useEffect(() => {
-    (async () => {
-      if (!location) return;
-      try {
-        setLoadingData(true);
-        setFetchError("");
-
-        const isBrand = BRAND_GROUPS[location];
-        let rows: any[] = [];
-
-        if (isBrand) {
-          const allData = await Promise.all(
-            BRAND_GROUPS[location].map((site) =>
-              fetchTabFromSheet(site)
-            )
-          );
-          rows = rollupByWeek(allData.flat());
-        } else {
-          rows = await fetchTabFromSheet(location);
-          rows.sort(
-            (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
-          );
-        }
-
-        setRawRows(rows);
-      } catch (err: any) {
-        setFetchError(err.message || "Error loading data");
-        setRawRows([]);
-      } finally {
-        setLoadingData(false);
-      }
-    })();
-  }, [location]);
-
-  // decorate rows with Period/Quarter
+  // decorate rows with Period + Quarter
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || "").trim();
@@ -516,18 +433,16 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group rows for Period/Quarter
+  // build grouped data for "Period" / "Quarter" dropdown
   function groupMergedRowsBy(bucketKey: "Period" | "Quarter") {
     if (!mergedRows.length) return [];
-    const grouped: Record<string, any[]> = mergedRows.reduce(
-      (acc, row) => {
-        const key = row[bucketKey];
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(row);
-        return acc;
-      },
-      {} as Record<string, any[]>
-    );
+    const grouped: Record<string, any[]> = {};
+
+    for (const row of mergedRows) {
+      const key = row[bucketKey];
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(row);
+    }
 
     const numericKeys = Object.keys(mergedRows[0]).filter(
       (k) => typeof mergedRows[0][k] === "number"
@@ -536,10 +451,7 @@ export default function FinancialPage() {
     return Object.entries(grouped).map(([label, rows]) => {
       const sums: Record<string, number> = {};
       numericKeys.forEach((col) => {
-        sums[col] = rows.reduce(
-          (total, r) => total + (r[col] || 0),
-          0
-        );
+        sums[col] = rows.reduce((total, r) => total + (r[col] || 0), 0);
       });
       return {
         Week: label,
@@ -555,59 +467,122 @@ export default function FinancialPage() {
     return groupMergedRowsBy("Quarter");
   }, [mergedRows, period]);
 
+  // compute insights from mergedRows
   const insights = useMemo(
     () => computeInsightsBundle(mergedRows),
     [mergedRows]
   );
 
-  // build the ranking table (ops/admin only)
+  // fetch rows any time location changes (brand / group / site)
   useEffect(() => {
-    (async () => {
-      if (roleLower !== "admin" && roleLower !== "operation") {
+    async function load() {
+      if (!location) return;
+      try {
+        setLoadingData(true);
+        setFetchError("");
+
+        const isBrand = !!BRAND_GROUPS[location];
+        let rows: any[] = [];
+
+        if (isBrand) {
+          const allData = await Promise.all(
+            BRAND_GROUPS[location].map((site) => fetchTab(site))
+          );
+          rows = rollupBy(allData.flat(), "Week");
+        } else {
+          // "GroupOverview" or a single site tab
+          rows = await fetchTab(location);
+          // keep them sorted
+          rows.sort(
+            (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
+          );
+        }
+
+        setRawRows(rows);
+      } catch (err: any) {
+        console.error(err);
+        setFetchError(
+          err instanceof Error
+            ? err.message
+            : "Unknown error loading data"
+        );
+        setRawRows([]);
+      } finally {
+        setLoadingData(false);
+      }
+    }
+
+    load();
+  }, [location]);
+
+  // build rankingData only for admin/ops
+  useEffect(() => {
+    async function buildRanking() {
+      if (
+        roleLower !== "admin" &&
+        roleLower !== "operation" &&
+        roleLower !== "ops"
+      ) {
         setRankingData([]);
         return;
       }
 
       try {
-        const all = await Promise.all(
-          STORE_LOCATIONS.map(async (site) => {
-            const siteRows = await fetchTabFromSheet(site);
-            if (!siteRows || siteRows.length === 0) return null;
+        const result = await Promise.all(
+          STORE_LOCATIONS.map(async (loc) => {
+            const rows = await fetchTab(loc);
+            if (!rows || rows.length === 0) return null;
 
-            const snap = computeInsightsBundle(siteRows);
-            if (!snap) return null;
+            const sorted = [...rows].sort(
+              (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
+            );
+            const latest = sorted[sorted.length - 1];
+            if (!latest) return null;
 
-            const {
-              wkLabel,
-              salesActual,
-              salesBudget,
+            const salesActual = latest.Sales_Actual || 0;
+            const salesBudget = latest.Sales_Budget || 0;
+
+            const payrollPct =
+              salesActual !== 0
+                ? (latest.Payroll_Actual / salesActual) * 100
+                : 0;
+
+            const foodPct =
+              salesActual !== 0
+                ? (latest.Food_Actual / salesActual) * 100
+                : 0;
+
+            const drinkPct =
+              salesActual !== 0
+                ? (latest.Drink_Actual / salesActual) * 100
+                : 0;
+
+            const salesVar = salesActual - salesBudget;
+
+            return {
+              location: loc,
+              week: latest.Week,
               payrollPct,
               foodPct,
               drinkPct,
-            } = snap;
-
-            const salesVar = (salesActual || 0) - (salesBudget || 0);
-
-            return {
-              location: site,
-              week: wkLabel,
-              payrollPct: payrollPct || 0,
-              foodPct: foodPct || 0,
-              drinkPct: drinkPct || 0,
               salesVar,
             };
           })
         );
 
-        const cleaned = all.filter(Boolean) as any[];
+        const cleaned = result.filter(Boolean) as any[];
         cleaned.sort((a, b) => b.payrollPct - a.payrollPct);
         setRankingData(cleaned);
-      } catch {
+      } catch (err) {
+        console.error("Ranking build failed:", err);
         setRankingData([]);
       }
-    })();
+    }
+
+    buildRanking();
   }, [roleLower]);
 
+  // chart config
   const chartConfig = {
     Sales: [
       { key: "Sales_Actual", color: "#4ade80", name: "Actual" },
@@ -638,17 +613,24 @@ export default function FinancialPage() {
   };
 
   const tooltipFormatter = (value: any, name: any) => {
-    const v =
-      value === undefined || value === null || isNaN(value)
-        ? "-"
-        : "£" + Number(value).toLocaleString();
-    return [v, name];
+    return ["£" + Number(value).toLocaleString(), name];
   };
 
-  /* GUARDS */
+  // guards
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500 text-sm font-medium">
+      <div
+        style={{
+          minHeight: "80vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Inter, system-ui, sans-serif",
+          color: "#6b7280",
+          fontSize: "0.9rem",
+          fontWeight: 500,
+        }}
+      >
         Loading profile…
       </div>
     );
@@ -656,8 +638,31 @@ export default function FinancialPage() {
 
   if (!session || !profile) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-white border border-gray-200 rounded-xl shadow p-4 text-center text-red-600 text-sm font-medium">
+      <div
+        style={{
+          minHeight: "80vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Inter, system-ui, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "0.75rem",
+            padding: "1rem 1.25rem",
+            maxWidth: "320px",
+            textAlign: "center",
+            color: "#dc2626",
+            fontWeight: 500,
+            fontSize: "0.9rem",
+            lineHeight: 1.4,
+            boxShadow:
+              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+          }}
+        >
           You are not signed in.
         </div>
       </div>
@@ -666,8 +671,31 @@ export default function FinancialPage() {
 
   if (!canViewFinance) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-white border border-gray-200 rounded-xl shadow p-4 text-center text-red-600 text-sm font-medium max-w-xs">
+      <div
+        style={{
+          minHeight: "80vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Inter, system-ui, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "0.75rem",
+            padding: "1rem 1.25rem",
+            maxWidth: "320px",
+            textAlign: "center",
+            color: "#dc2626",
+            fontWeight: 500,
+            fontSize: "0.9rem",
+            lineHeight: 1.4,
+            boxShadow:
+              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+          }}
+        >
           You don&apos;t have permission to view Financial Performance.
         </div>
       </div>
@@ -676,160 +704,435 @@ export default function FinancialPage() {
 
   if (!allowedLocations.length || !initialLocation) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-white border border-gray-200 rounded-xl shadow p-4 text-center text-red-600 text-sm font-medium max-w-xs">
+      <div
+        style={{
+          minHeight: "80vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Inter, system-ui, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "0.75rem",
+            padding: "1rem 1.25rem",
+            maxWidth: "320px",
+            textAlign: "center",
+            color: "#dc2626",
+            fontWeight: 500,
+            fontSize: "0.9rem",
+            lineHeight: 1.4,
+            boxShadow:
+              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+          }}
+        >
           No location access configured for this account.
         </div>
       </div>
     );
   }
 
-  /* RENDER */
+  // MAIN RENDER
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      {/* Header (portal style) */}
-      <FinancialHeaderInline
-        profile={profile}
-        onSignOut={handleSignOut}
-      />
-
-      {/* Body */}
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Title */}
-        <h1 className="text-center text-xl font-semibold text-gray-900">
-          Performance 2025
-        </h1>
-
-        {/* Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-center gap-4 text-sm">
-          <div className="flex flex-col">
-            <label className="text-gray-700 font-medium mb-1">
-              Select Location / Brand
-            </label>
-            <select
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-64 border rounded-md px-3 py-2 bg-white shadow-sm text-gray-800"
+    <div
+      style={{
+        backgroundColor: "#f9fafb",
+        minHeight: "100vh",
+        fontFamily: "Inter, system-ui, sans-serif",
+        color: "#111827",
+      }}
+    >
+      {/* header bar (like portal header style, inline to avoid globals) */}
+      <header
+        style={{
+          width: "100%",
+          borderBottom: "1px solid #e5e7eb",
+          backgroundColor: "rgba(255,255,255,0.9)",
+          backdropFilter: "blur(4px)",
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "1280px",
+            margin: "0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0.75rem 1rem",
+          }}
+        >
+          {/* left: logo + portal link */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <Link
+              href="/"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                textDecoration: "none",
+              }}
             >
-              {allowedLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc === "GroupOverview" ? "Group Overview" : loc}
-                </option>
-              ))}
-            </select>
+              <img
+                src="/logo.png"
+                alt="Company Logo"
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "4px",
+                  objectFit: "contain",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  lineHeight: 1.1,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    color: "#111827",
+                  }}
+                >
+                  La Mia Mamma Portal
+                </span>
+                <span
+                  style={{
+                    fontSize: "0.7rem",
+                    color: "#6b7280",
+                    marginTop: "-2px",
+                  }}
+                >
+                  Staff Access
+                </span>
+              </div>
+            </Link>
           </div>
 
-          <div className="flex flex-col">
-            <label className="text-gray-700 font-medium mb-1">
-              Select Period
-            </label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="w-32 border rounded-md px-3 py-2 bg-white shadow-sm text-gray-800"
+          {/* right: role + logout */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.75rem",
+              fontSize: "0.8rem",
+            }}
+          >
+            <div
+              style={{
+                lineHeight: 1.2,
+                textAlign: "right",
+                maxWidth: "140px",
+              }}
             >
-              {PERIODS.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
+              <div
+                style={{
+                  color: "#111827",
+                  fontWeight: 500,
+                  fontSize: "0.8rem",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+                title={profile?.full_name || "User"}
+              >
+                {profile?.full_name || "User"}
+              </div>
+              <div
+                style={{
+                  color: "#6b7280",
+                  fontSize: "0.7rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                {profile?.role}
+              </div>
+            </div>
+
+            <button
+              onClick={handleSignOut}
+              style={{
+                backgroundColor: "#111827",
+                color: "white",
+                fontWeight: 600,
+                fontSize: "0.7rem",
+                lineHeight: 1.2,
+                borderRadius: "0.375rem",
+                padding: "0.4rem 0.6rem",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 8px 16px rgba(0,0,0,0.25)",
+              }}
+            >
+              Log out
+            </button>
           </div>
         </div>
+      </header>
 
-        {/* Insights */}
-        <InsightsBar
-          insights={insights}
-          currentWeekNow={`W${getCurrentWeekNumber()}`}
-          payrollTarget={PAYROLL_TARGET}
-        />
+      {/* controls row */}
+      <section
+        style={{
+          maxWidth: "1280px",
+          margin: "1rem auto 0",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "1rem",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          padding: "0 1rem",
+        }}
+      >
+        {/* Title + Week */}
+        <div style={{ flex: "1 1 auto", minWidth: "200px" }}>
+          <div
+            style={{
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              color: "#6b7280",
+              marginBottom: "0.25rem",
+              lineHeight: 1.2,
+            }}
+          >
+            Performance {new Date().getFullYear()}
+          </div>
+          <h1
+            style={{
+              fontSize: "1.125rem",
+              lineHeight: 1.3,
+              fontWeight: 600,
+              color: "#111827",
+              margin: 0,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "baseline",
+              gap: "0.5rem",
+            }}
+          >
+            <span>Financial Dashboard</span>
+            <span
+              style={{
+                fontSize: "0.7rem",
+                color: "#6b7280",
+                fontWeight: 400,
+              }}
+            >
+              Current Week: {currentWeekNow}
+            </span>
+          </h1>
+        </div>
 
-        {/* Compliance */}
-        <ComplianceBar
-          insights={insights}
-          payrollTarget={PAYROLL_TARGET}
-          foodTarget={FOOD_TARGET}
-          drinkTarget={DRINK_TARGET}
-        />
+        {/* Location select */}
+        <div
+          style={{
+            flex: "0 0 auto",
+            minWidth: "200px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.25rem",
+          }}
+        >
+          <label
+            style={{
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              color: "#374151",
+              lineHeight: 1.2,
+            }}
+          >
+            Select Location
+          </label>
 
-        {/* Ranking (only ops/admin) */}
-        {(roleLower === "admin" || roleLower === "operation") &&
-          rankingData.length > 0 && (
-            <RankingTable
-              rankingData={rankingData}
-              payrollTarget={PAYROLL_TARGET}
-              foodTarget={FOOD_TARGET}
-              drinkTarget={DRINK_TARGET}
-            />
-          )}
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            style={{
+              backgroundColor: "#fff",
+              border: "1px solid #d1d5db",
+              borderRadius: "9999px",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              color: "#111827",
+              padding: "0.5rem 0.75rem",
+              boxShadow:
+                "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
+            }}
+          >
+            {allowedLocations.map((loc) => (
+              <option key={loc} value={loc}>
+                {loc}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {/* Loading state / error state */}
-        {loadingData && (
-          <p className="text-center text-gray-500 text-sm font-medium">
-            Loading data…
-          </p>
-        )}
+        {/* Period select */}
+        <div
+          style={{
+            flex: "0 0 auto",
+            minWidth: "160px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.25rem",
+          }}
+        >
+          <label
+            style={{
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              color: "#374151",
+              lineHeight: 1.2,
+            }}
+          >
+            Select Period
+          </label>
 
-        {!loadingData && fetchError && (
-          <p className="text-center text-red-600 text-sm font-medium">
-            Could not load data: {fetchError}
-          </p>
-        )}
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            style={{
+              backgroundColor: "#fff",
+              border: "1px solid #d1d5db",
+              borderRadius: "9999px",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              color: "#111827",
+              padding: "0.5rem 0.75rem",
+              boxShadow:
+                "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
+            }}
+          >
+            {PERIODS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
 
-        {/* KPI cards */}
-        {!loadingData && !fetchError && (
-          <KPIBlock
-            data={filteredData}
+      {/* Insights */}
+      <InsightsBar
+        insights={insights}
+        currentWeekNow={currentWeekNow}
+        payrollTarget={PAYROLL_TARGET}
+      />
+
+      {/* Compliance (RENDERED ONCE HERE ONLY) */}
+      <ComplianceBar
+        insights={insights}
+        payrollTarget={PAYROLL_TARGET}
+        foodTarget={FOOD_TARGET}
+        drinkTarget={DRINK_TARGET}
+      />
+
+      {/* Ranking for admin/ops only */}
+      {(roleLower === "admin" ||
+        roleLower === "operation" ||
+        roleLower === "ops") &&
+        rankingData.length > 0 && (
+          <RankingTable
+            rankingData={rankingData}
             payrollTarget={PAYROLL_TARGET}
             foodTarget={FOOD_TARGET}
             drinkTarget={DRINK_TARGET}
           />
         )}
 
-        {/* Tab buttons */}
-        <div className="flex flex-wrap justify-center gap-2 mt-6 mb-4">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-3 py-2 rounded-md text-[13px] font-medium border shadow-sm ${
+      {/* KPI row */}
+      {!loadingData && !fetchError && (
+        <KPIBlock
+          data={filteredData}
+          payrollTarget={PAYROLL_TARGET}
+          foodTarget={FOOD_TARGET}
+          drinkTarget={DRINK_TARGET}
+        />
+      )}
+
+      {/* Chart tab buttons */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          flexWrap: "wrap",
+          marginTop: "1.5rem",
+          marginBottom: "1rem",
+          gap: "0.5rem",
+        }}
+      >
+        {TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              backgroundColor: activeTab === tab ? "#111827" : "#fff",
+              color: activeTab === tab ? "#fff" : "#111827",
+              border: "1px solid #d1d5db",
+              borderRadius: "0.5rem",
+              padding: "0.5rem 0.75rem",
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              lineHeight: 1.2,
+              cursor: "pointer",
+              boxShadow:
                 activeTab === tab
-                  ? "bg-gray-900 text-white border-gray-900 shadow-xl"
-                  : "bg-white text-gray-900 border-gray-300"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Chart */}
-        {!loadingData && !fetchError && (
-          <ChartSection
-            activeTab={activeTab}
-            filteredData={filteredData}
-            chartConfig={chartConfig}
-            CSVLink={CSVLink}
-            yTickFormatter={val =>
-              val === 0
-                ? "£0"
-                : val
-                ? "£" + Number(val).toLocaleString()
-                : ""
-            }
-            tooltipFormatter={(value, name) => {
-              const v =
-                value === undefined ||
-                value === null ||
-                isNaN(value)
-                  ? "-"
-                  : "£" + Number(value).toLocaleString();
-              return [v, name];
+                  ? "0 12px 24px rgba(0,0,0,0.4)"
+                  : "0 8px 16px rgba(0,0,0,0.05)",
             }}
-          />
-        )}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
 
-        {/* Footer */}
-        <FinancialFooter />
-      </main>
+      {/* Chart */}
+      {!loadingData && !fetchError && (
+        <ChartSection
+          activeTab={activeTab}
+          filteredData={filteredData}
+          chartConfig={chartConfig}
+          yTickFormatter={yTickFormatter}
+          tooltipFormatter={tooltipFormatter}
+          CSVLink={CSVLink}
+        />
+      )}
+
+      {/* Errors / loading states under main content */}
+      {loadingData && (
+        <p
+          style={{
+            textAlign: "center",
+            marginTop: "1rem",
+            color: "#6b7280",
+          }}
+        >
+          Loading data…
+        </p>
+      )}
+
+      {!loadingData && fetchError && (
+        <p
+          style={{
+            textAlign: "center",
+            marginTop: "1rem",
+            color: "#dc2626",
+            fontWeight: 500,
+          }}
+        >
+          Could not load data: {fetchError}
+        </p>
+      )}
+
+      <FinancialFooter />
     </div>
   );
 }
