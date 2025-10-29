@@ -6,13 +6,11 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
-// Match the portal header role model
-type UserRole = "user" | "ops" | "admin" | "manager" | "operation";
-
+type UserRole = "user" | "ops" | "admin" | "operation" | "manager";
 type ProfileRow = {
   id: string;
   full_name: string | null;
-  role: UserRole | string;
+  role: UserRole;
   home_location: string | null;
 };
 
@@ -20,17 +18,15 @@ export default function FinancialHeader() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // local header state
-  const [profileLoaded, setProfileLoaded] = useState<boolean>(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
 
-  // pull minimal auth info for header (like the portal header does)
+  // grab auth + profile (same idea as the portal header)
   useEffect(() => {
     (async () => {
       try {
         const { data: authData } = await supabase.auth.getUser();
         const user = authData?.user;
-
         if (!user) {
           setProfileLoaded(true);
           setProfile(null);
@@ -43,9 +39,8 @@ export default function FinancialHeader() {
           .eq("id", user.id)
           .limit(1);
 
-        // if not found in `profiles`, fallback to auth user info
         const prof: ProfileRow =
-          (profRows?.[0] as ProfileRow) ??
+          profRows?.[0] ??
           ({
             id: user.id,
             full_name: (user as any).email ?? null,
@@ -68,9 +63,9 @@ export default function FinancialHeader() {
   }
 
   return (
-    <header className="w-full border-b bg-white/90 backdrop-blur-sm sticky top-0 z-50">
+    <header className="w-full border-b bg-white/90 backdrop-blur-sm">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3 md:py-4">
-        {/* LEFT: Logo + text */}
+        {/* Left side: logo + text */}
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
             <Image
@@ -85,27 +80,27 @@ export default function FinancialHeader() {
                 La Mia Mamma Portal
               </span>
               <span className="text-[11px] text-gray-500 -mt-0.5">
-                Financial Performance
+                Staff Access
               </span>
             </div>
           </Link>
         </div>
 
-        {/* RIGHT: profile / admin link / logout */}
+        {/* Right side: admin pill (if admin), name/role, logout */}
         <div className="flex items-center gap-3 text-sm">
           {profileLoaded && profile ? (
             <>
-              {/* Admin Panel pill (only if admin and not already on /admin) */}
-              {String(profile.role).toLowerCase() === "admin" &&
-                pathname !== "/admin" && (
-                  <Link
-                    href="/admin"
-                    className="hidden sm:inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition"
-                  >
-                    Admin Panel
-                  </Link>
-                )}
+              {/* Admin Panel pill if admin and not already on /admin */}
+              {profile.role === "admin" && pathname !== "/admin" && (
+                <Link
+                  href="/admin"
+                  className="hidden sm:inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition"
+                >
+                  Admin Panel
+                </Link>
+              )}
 
+              {/* name + role */}
               <div className="text-right leading-tight hidden sm:block">
                 <div className="text-gray-900 font-medium text-[13px] truncate max-w-[140px]">
                   {profile.full_name || "User"}
@@ -115,6 +110,7 @@ export default function FinancialHeader() {
                 </div>
               </div>
 
+              {/* logout */}
               <button
                 onClick={handleLogout}
                 className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
