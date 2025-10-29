@@ -1,6 +1,4 @@
 // src/components/financial/ComplianceBar.tsx
-// This version is TS-friendly and matches the portal style.
-// complianceSnapshot is now OPTIONAL.
 
 import React from "react";
 
@@ -14,8 +12,8 @@ type InsightsShape = {
   foodPct: number;
   drinkPct: number;
   salesVsLastYearPct: number;
-  avgPayrollVar4w: number; // 4-week avg of Payroll_v%
-  currentWeekLabel?: string; // not strictly needed here
+  avgPayrollVar4w: number; // last-4-week avg of Payroll_v%
+  currentWeekLabel?: string;
 };
 
 type ComplianceBarProps = {
@@ -23,8 +21,7 @@ type ComplianceBarProps = {
   payrollTarget: number;
   foodTarget: number;
   drinkTarget: number;
-  // this was previously required and caused the Vercel error.
-  // now it's optional.
+  // <- THIS IS NOW OPTIONAL so Vercel stops complaining.
   complianceSnapshot?: InsightsShape | null;
 };
 
@@ -35,12 +32,9 @@ export default function ComplianceBar({
   drinkTarget,
   complianceSnapshot,
 }: ComplianceBarProps) {
-  // The snapshot we render:
-  // if a separate complianceSnapshot was passed, use it.
-  // else just reuse insights.
+  // Prefer a provided snapshot, fallback to `insights`
   const snapshot = complianceSnapshot ?? insights;
 
-  // If we truly don't have data, render a tiny "no data" pill
   if (!snapshot) {
     return (
       <section
@@ -68,14 +62,11 @@ export default function ComplianceBar({
     avgPayrollVar4w,
   } = snapshot;
 
-  // --- Traffic light colour logic from avgPayrollVar4w ---
-  // Rule you gave:
-  //   if avg < 1            => green
-  //   if 1 <= avg < 2        => amber / yellow
-  //   if avg >= 2            => red
-  //
-  // You also said we must include negative values in the average,
-  // but classification depends on the magnitude (absolute value).
+  // TRAFFIC LIGHT COLOUR:
+  // rule:
+  //   |avg| < 1       -> green
+  //   1 <= |avg| < 2  -> amber
+  //   |avg| >= 2      -> red
   const magnitude = Math.abs(avgPayrollVar4w ?? 0);
 
   let dotColor = "#10B981"; // green
@@ -85,7 +76,6 @@ export default function ComplianceBar({
     dotColor = "#EF4444"; // red
   }
 
-  // helpers
   function pct(val: number | undefined | null) {
     if (val === undefined || val === null || Number.isNaN(val)) {
       return "0.0%";
@@ -98,7 +88,6 @@ export default function ComplianceBar({
   const drinkIsOk = drinkPct <= drinkTarget;
   const salesVsLyOk = (salesVsLastYearPct ?? 0) >= 0;
 
-  // shared styles (inline so we don't rely on globals in prod build)
   const cardBase: React.CSSProperties = {
     backgroundColor: "#fff",
     borderRadius: "0.75rem",
@@ -170,7 +159,7 @@ export default function ComplianceBar({
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
-      {/* Payroll % */}
+      {/* Payroll card */}
       <div style={cardBase}>
         <div style={headerRow}>
           <span style={{ fontWeight: 600, color: "#111827" }}>
@@ -190,10 +179,13 @@ export default function ComplianceBar({
         </div>
       </div>
 
-      {/* Food % */}
+      {/* Food card */}
       <div style={cardBase}>
         <div style={headerRow}>
-          <span style={{ fontWeight: 600, color: "#111827" }}>Food %</span>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Food %
+          </span>
+
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≤ {foodTarget}%
@@ -207,10 +199,13 @@ export default function ComplianceBar({
         </div>
       </div>
 
-      {/* Drink % */}
+      {/* Drink card */}
       <div style={cardBase}>
         <div style={headerRow}>
-          <span style={{ fontWeight: 600, color: "#111827" }}>Drink %</span>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Drink %
+          </span>
+
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≤ {drinkTarget}%
@@ -224,12 +219,13 @@ export default function ComplianceBar({
         </div>
       </div>
 
-      {/* Sales vs LY */}
+      {/* Sales vs LY card */}
       <div style={cardBase}>
         <div style={headerRow}>
           <span style={{ fontWeight: 600, color: "#111827" }}>
             Sales vs LY
           </span>
+
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≥ 0%
