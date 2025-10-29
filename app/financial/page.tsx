@@ -737,10 +737,12 @@ export default function FinancialPage() {
       </section>
 
       {/* Row 1: Two big cards (Current Week / Last Week Results) */}
-      <InsightsBar
-        insights={insights}
-        payrollTarget={PAYROLL_TARGET}
-      />
+      {/* Row 1: Two big cards (Current Week / Last Week Results) */}
+<InsightsBar
+  insights={insights}
+  payrollTarget={PAYROLL_TARGET}
+  currentWeekNow={currentWeekNow}
+/>
 
       {/* Row 2: Compliance KPIs (Payroll%, Food%, Drink%, Sales vs LY) */}
       <ComplianceBar
