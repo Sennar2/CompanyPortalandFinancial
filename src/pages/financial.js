@@ -16,7 +16,6 @@ import {
 import { CSVLink } from "react-csv";
 
 // bring in tailwind JUST for this page (you created this file)
-import "./financial.tailwind.css";
 
 // supabase client (same one the portal uses)
 import { supabase } from "../lib/supabaseClient";
