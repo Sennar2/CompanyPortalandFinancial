@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import "../app/globals.css";
 
 export default function FinancialHeader() {
   const router = useRouter();
