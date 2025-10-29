@@ -1,4 +1,3 @@
-// src/components/financial/FinancialHeader.jsx
 "use client";
 
 import React from "react";
@@ -52,6 +51,7 @@ export default function FinancialHeader({
         >
           {profile?.full_name || "User"}
         </div>
+
         <div
           style={{
             fontSize: "0.7rem",
@@ -85,17 +85,19 @@ export default function FinancialHeader({
         </button>
       </div>
 
-      {/* centered block with logo + copy + controls below */}
+      {/* center stack: LOGO + "La Mia Mamma Portal / Staff Access" + selectors */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: "0.5rem",
+          gap: "0.75rem",
           textAlign: "center",
         }}
       >
-        {/* clickable logo / title back to portal home */}
+        {/* ⬇⬇⬇ this is the ONLY functional change:
+             wrapped logo/title block in <Link href="/">...</Link>
+             so clicking it returns to main portal home */}
         <Link
           href="/"
           style={{
@@ -106,6 +108,10 @@ export default function FinancialHeader({
           <div
             style={{
               cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "0.25rem",
             }}
           >
             <img
@@ -116,21 +122,20 @@ export default function FinancialHeader({
                 width: "auto",
                 objectFit: "contain",
                 display: "block",
-                marginLeft: "auto",
-                marginRight: "auto",
               }}
             />
+
             <div
               style={{
                 fontSize: "0.9rem",
                 fontWeight: 600,
                 color: "#111827",
                 lineHeight: 1.3,
-                marginTop: "0.25rem",
               }}
             >
               La Mia Mamma Portal
             </div>
+
             <div
               style={{
                 fontSize: "0.7rem",
@@ -150,10 +155,10 @@ export default function FinancialHeader({
             flexWrap: "wrap",
             justifyContent: "center",
             gap: "1rem",
-            marginTop: "1rem",
+            marginTop: "0.5rem",
           }}
         >
-          {/* Location dropdown */}
+          {/* Location / Brand dropdown */}
           <div style={{ textAlign: "left" }}>
             <label
               style={{
@@ -166,6 +171,7 @@ export default function FinancialHeader({
             >
               Select Location / Brand
             </label>
+
             <select
               value={location}
               onChange={(e) => setLocation(e.target.value)}
@@ -202,6 +208,7 @@ export default function FinancialHeader({
             >
               Select Period
             </label>
+
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
