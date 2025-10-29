@@ -1,36 +1,32 @@
-// src/components/financial/ComplianceBar.jsx
+// src/components/financial/ComplianceBar.tsx
+// This version is TS-friendly and matches the portal style.
+// complianceSnapshot is now OPTIONAL.
 
-/**
- * ComplianceBar
- *
- * Shows last completed week's compliance snapshot:
- * - Payroll %
- * - Food %
- * - Drink %
- * - Sales vs LY %
- *
- * We also render the traffic-light dot based on avgPayrollVar4w:
- *   abs(avgPayrollVar4w) < 1     => green
- *   1 <= abs(avgPayrollVar4w) < 2 => amber
- *   abs(avgPayrollVar4w) >= 2    => red
- *
- * Props:
- *   insights: {
- *     wkLabel: string;                // e.g. "W43"
- *     payrollPct: number;
- *     foodPct: number;
- *     drinkPct: number;
- *     salesVsLastYearPct: number;
- *     avgPayrollVar4w: number;        // last-4-week avg of Payroll_v%
- *   } | null
- *
- *   payrollTarget: number (e.g. 35)
- *   foodTarget: number    (e.g. 12.5)
- *   drinkTarget: number   (e.g. 5.5)
- *
- *   complianceSnapshot?: same shape as insights (OPTIONAL)
- *     - if not provided, we reuse `insights`.
- */
+import React from "react";
+
+type InsightsShape = {
+  wkLabel: string; // e.g. "W43"
+  salesActual: number;
+  salesBudget: number;
+  salesVar: number;
+  salesVarPct: number;
+  payrollPct: number;
+  foodPct: number;
+  drinkPct: number;
+  salesVsLastYearPct: number;
+  avgPayrollVar4w: number; // 4-week avg of Payroll_v%
+  currentWeekLabel?: string; // not strictly needed here
+};
+
+type ComplianceBarProps = {
+  insights: InsightsShape | null;
+  payrollTarget: number;
+  foodTarget: number;
+  drinkTarget: number;
+  // this was previously required and caused the Vercel error.
+  // now it's optional.
+  complianceSnapshot?: InsightsShape | null;
+};
 
 export default function ComplianceBar({
   insights,
@@ -38,10 +34,13 @@ export default function ComplianceBar({
   foodTarget,
   drinkTarget,
   complianceSnapshot,
-}) {
-  // Fallback so Vercel build doesn't explode:
+}: ComplianceBarProps) {
+  // The snapshot we render:
+  // if a separate complianceSnapshot was passed, use it.
+  // else just reuse insights.
   const snapshot = complianceSnapshot ?? insights;
 
+  // If we truly don't have data, render a tiny "no data" pill
   if (!snapshot) {
     return (
       <section
@@ -60,7 +59,6 @@ export default function ComplianceBar({
     );
   }
 
-  // Destructure what we need from the snapshot
   const {
     wkLabel,
     payrollPct,
@@ -70,14 +68,16 @@ export default function ComplianceBar({
     avgPayrollVar4w,
   } = snapshot;
 
-  // --- Traffic light dot colour logic using avgPayrollVar4w ---
-  // you said:
-  //   if avg < 1  => green
-  //   if 1 < avg < 2 => amber
-  //   if avg > 2 => red
-  // NOTE: we interpret "avg" as absolute value, because you said
-  // e.g. (-1.48%) should be amber (not green) if magnitude is in that band.
+  // --- Traffic light colour logic from avgPayrollVar4w ---
+  // Rule you gave:
+  //   if avg < 1            => green
+  //   if 1 <= avg < 2        => amber / yellow
+  //   if avg >= 2            => red
+  //
+  // You also said we must include negative values in the average,
+  // but classification depends on the magnitude (absolute value).
   const magnitude = Math.abs(avgPayrollVar4w ?? 0);
+
   let dotColor = "#10B981"; // green
   if (magnitude >= 1 && magnitude < 2) {
     dotColor = "#FACC15"; // amber/yellow
@@ -85,9 +85,9 @@ export default function ComplianceBar({
     dotColor = "#EF4444"; // red
   }
 
-  // --- Helpers for rendering numeric values nicely ---
-  function pct(val) {
-    if (val === undefined || val === null || isNaN(val)) {
+  // helpers
+  function pct(val: number | undefined | null) {
+    if (val === undefined || val === null || Number.isNaN(val)) {
       return "0.0%";
     }
     return `${Number(val).toFixed(1)}%`;
@@ -98,8 +98,8 @@ export default function ComplianceBar({
   const drinkIsOk = drinkPct <= drinkTarget;
   const salesVsLyOk = (salesVsLastYearPct ?? 0) >= 0;
 
-  // --- Shared card styles ---
-  const cardBase = {
+  // shared styles (inline so we don't rely on globals in prod build)
+  const cardBase: React.CSSProperties = {
     backgroundColor: "#fff",
     borderRadius: "0.75rem",
     boxShadow:
@@ -110,8 +110,7 @@ export default function ComplianceBar({
     fontFamily: "Inter, system-ui, sans-serif",
   };
 
-  // header row inside each card
-  const labelRow = {
+  const headerRow: React.CSSProperties = {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
@@ -123,15 +122,14 @@ export default function ComplianceBar({
     columnGap: "0.5rem",
   };
 
-  const wkCluster = {
+  const wkCluster: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     gap: "0.4rem",
     flexWrap: "wrap",
   };
 
-  // the dot
-  const dotStyle = {
+  const dotStyle: React.CSSProperties = {
     width: "14px",
     height: "14px",
     borderRadius: "999px",
@@ -141,8 +139,7 @@ export default function ComplianceBar({
     flexShrink: 0,
   };
 
-  // green/red value styling
-  const goodValue = {
+  const goodVal: React.CSSProperties = {
     fontSize: "1rem",
     fontWeight: 600,
     color: "#10B981",
@@ -152,7 +149,7 @@ export default function ComplianceBar({
     gap: "0.4rem",
   };
 
-  const badValue = {
+  const badVal: React.CSSProperties = {
     fontSize: "1rem",
     fontWeight: 600,
     color: "#EF4444",
@@ -162,7 +159,6 @@ export default function ComplianceBar({
     gap: "0.4rem",
   };
 
-  // --- Render ---
   return (
     <section
       style={{
@@ -174,13 +170,12 @@ export default function ComplianceBar({
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
-      {/* Payroll card */}
+      {/* Payroll % */}
       <div style={cardBase}>
-        <div style={labelRow}>
+        <div style={headerRow}>
           <span style={{ fontWeight: 600, color: "#111827" }}>
             Payroll %
           </span>
-
           <div style={wkCluster}>
             <span style={dotStyle} />
             <span>
@@ -189,19 +184,16 @@ export default function ComplianceBar({
           </div>
         </div>
 
-        <div style={payrollIsOk ? goodValue : badValue}>
+        <div style={payrollIsOk ? goodVal : badVal}>
           <span>{pct(payrollPct)}</span>
           <span>{payrollIsOk ? "✓" : "✕"}</span>
         </div>
       </div>
 
-      {/* Food card */}
+      {/* Food % */}
       <div style={cardBase}>
-        <div style={labelRow}>
-          <span style={{ fontWeight: 600, color: "#111827" }}>
-            Food %
-          </span>
-
+        <div style={headerRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>Food %</span>
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≤ {foodTarget}%
@@ -209,19 +201,16 @@ export default function ComplianceBar({
           </div>
         </div>
 
-        <div style={foodIsOk ? goodValue : badValue}>
+        <div style={foodIsOk ? goodVal : badVal}>
           <span>{pct(foodPct)}</span>
           <span>{foodIsOk ? "✓" : "✕"}</span>
         </div>
       </div>
 
-      {/* Drink card */}
+      {/* Drink % */}
       <div style={cardBase}>
-        <div style={labelRow}>
-          <span style={{ fontWeight: 600, color: "#111827" }}>
-            Drink %
-          </span>
-
+        <div style={headerRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>Drink %</span>
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≤ {drinkTarget}%
@@ -229,19 +218,18 @@ export default function ComplianceBar({
           </div>
         </div>
 
-        <div style={drinkIsOk ? goodValue : badValue}>
+        <div style={drinkIsOk ? goodVal : badVal}>
           <span>{pct(drinkPct)}</span>
           <span>{drinkIsOk ? "✓" : "✕"}</span>
         </div>
       </div>
 
-      {/* Sales vs LY card */}
+      {/* Sales vs LY */}
       <div style={cardBase}>
-        <div style={labelRow}>
+        <div style={headerRow}>
           <span style={{ fontWeight: 600, color: "#111827" }}>
             Sales vs LY
           </span>
-
           <div style={wkCluster}>
             <span>
               <strong>{wkLabel}</strong> • Target ≥ 0%
@@ -249,7 +237,7 @@ export default function ComplianceBar({
           </div>
         </div>
 
-        <div style={salesVsLyOk ? goodValue : badValue}>
+        <div style={salesVsLyOk ? goodVal : badVal}>
           <span>{pct(salesVsLastYearPct)}</span>
           <span>{salesVsLyOk ? "✓" : "✕"}</span>
         </div>
