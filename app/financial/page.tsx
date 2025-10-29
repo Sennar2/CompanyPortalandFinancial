@@ -4,14 +4,17 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../src/lib/supabaseClient";
 import { CSVLink } from "react-csv";
-import InsightsBar from "../../src/components/financial/InsightsBar";
+
 import ComplianceBar from "../../src/components/financial/ComplianceBar";
 import RankingTable from "../../src/components/financial/RankingTable";
 import KPIBlock from "../../src/components/financial/KPIBlock";
 import ChartSection from "../../src/components/financial/ChartSection";
 import FinancialFooter from "../../src/components/financial/FinancialFooter";
 
-// targets
+// ─────────────────────────
+// CONSTANTS
+// ─────────────────────────
+
 const PAYROLL_TARGET = 35; // %
 const FOOD_TARGET = 12.5; // %
 const DRINK_TARGET = 5.5; // %
@@ -56,16 +59,16 @@ const PERIODS = ["Week", "Period", "Quarter"];
 const TABS = ["Sales", "Payroll", "Food", "Drink"];
 
 // ─────────────────────────
-// helpers
+// HELPERS
 // ─────────────────────────
 
-// convert "W43" → 43
+// "W43" -> 43
 function parseWeekNum(weekStr: any) {
   const num = parseInt(String(weekStr || "").replace(/[^\d]/g, ""), 10);
   return isNaN(num) ? 0 : num;
 }
 
-// ISO week for “today”
+// ISO week (Mon-Sun style)
 function getISOWeek(date = new Date()) {
   const d = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
@@ -73,14 +76,16 @@ function getISOWeek(date = new Date()) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const weekNo = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
   return weekNo > 52 ? 52 : weekNo;
 }
 function getCurrentWeekLabel() {
   return `W${getISOWeek(new Date())}`;
 }
 
-// sheet parsing
+// parse Google Sheets tab -> array of row objects
 function parseSheetValues(values: any[][] | undefined) {
   if (!values || values.length < 2) return [];
   const [headers, ...rows] = values;
@@ -102,7 +107,7 @@ function parseSheetValues(values: any[][] | undefined) {
   );
 }
 
-// fetch one tab
+// GET one sheet tab
 async function fetchTab(tabName: string) {
   const range = `${tabName}!A1:Z100`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(
@@ -117,35 +122,40 @@ async function fetchTab(tabName: string) {
   return parseSheetValues(json.values);
 }
 
-// rollup multiple sites into brand totals per week
-function rollupBy(rowsArr: any[], bucketKey: string) {
+// merge multiple site tabs into week totals (for a Brand)
+function rollupByWeek(rowsArr: any[]) {
   if (!rowsArr.length) return [];
   const grouped: Record<string, any[]> = {};
   for (const row of rowsArr) {
-    const key = String(row[bucketKey]).trim();
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(row);
+    const w = String(row.Week || "").trim();
+    if (!grouped[w]) grouped[w] = [];
+    grouped[w].push(row);
   }
+
   const numericKeys = Object.keys(rowsArr[0]).filter(
     (k) => typeof rowsArr[0][k] === "number"
   );
-  const merged = Object.entries(grouped).map(([label, groupRows]) => {
+
+  const merged = Object.entries(grouped).map(([weekLabel, rows]) => {
     const totals: Record<string, number> = {};
-    numericKeys.forEach((nk) => {
-      totals[nk] = groupRows.reduce((sum, r) => sum + (r[nk] || 0), 0);
+    numericKeys.forEach((col) => {
+      totals[col] = rows.reduce((sum, r) => sum + (r[col] || 0), 0);
     });
     return {
+      Week: weekLabel,
       ...totals,
-      [bucketKey]: label,
     };
   });
-  if (bucketKey === "Week") {
-    merged.sort((a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week));
-  }
+
+  // sort by week number ascending
+  merged.sort(
+    (a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
+  );
+
   return merged;
 }
 
-// exactly like we used: map W# -> Period + Quarter
+// Builds Week -> Period,Quarter lookup
 function buildWeekToPeriodQuarter() {
   return Array.from({ length: 52 }, (_, i) => {
     const w = i + 1;
@@ -168,19 +178,26 @@ function buildWeekToPeriodQuarter() {
   });
 }
 
-// find last “completed” week with data and build insights object
+/**
+ * computeInsightsBundle
+ * Picks "last completed week" (currentWeek-1 with data),
+ * and returns:
+ * - last week's sales, payroll%, etc
+ * - avgPayrollVar4w = avg of Payroll_v% last 4 weeks (can be + or -)
+ */
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
 
-  // decorate with numeric week
+  // decorate rows with numeric week
   const decorated = rows.map((r) => ({
     ...r,
     __weekNum: parseWeekNum(r.Week),
   }));
 
-  // choose snapshot week = (currentISOWeek - 1)
+  // choose snapshot week = current ISO week - 1
   const currentWeekNum = getISOWeek(new Date());
-  const snapshotWeekNum = currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
+  const snapshotWeekNum =
+    currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
   function rowHasData(r: any) {
     return (
@@ -190,12 +207,12 @@ function computeInsightsBundle(rows: any[]) {
     );
   }
 
-  // prefer exact snapshot week with data
+  // try exact snapshotWeekNum first
   let latestRow = decorated.find(
     (r) => r.__weekNum === snapshotWeekNum && rowHasData(r)
   );
 
-  // fallback: most recent <= snapshotWeekNum with data
+  // fallback: most recent <= snapshotWeekNum that has data
   if (!latestRow) {
     const cands = decorated
       .filter((r) => r.__weekNum <= snapshotWeekNum && rowHasData(r))
@@ -211,14 +228,12 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = cands[cands.length - 1];
   }
 
-  if (!latestRow) {
-    return null;
-  }
+  if (!latestRow) return null;
 
   const usedWeekNum = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${usedWeekNum}`;
 
-  // last 4-week avg for Payroll_v%
+  // compute last-4-weeks avg of Payroll_v%
   const windowWeeks = [
     usedWeekNum,
     usedWeekNum - 1,
@@ -233,14 +248,20 @@ function computeInsightsBundle(rows: any[]) {
     return Number.isNaN(num) ? 0 : num;
   }
 
-  const last4Rows = decorated.filter((r) => windowWeeks.includes(r.__weekNum));
-  const payrollTrendVals = last4Rows.map((row) => parsePayrollVar(row["Payroll_v%"]));
+  const last4Rows = decorated.filter((r) =>
+    windowWeeks.includes(r.__weekNum)
+  );
+  const payrollTrendVals = last4Rows.map((row) =>
+    parsePayrollVar(row["Payroll_v%"])
+  );
 
   const avgPayrollVar4w =
     payrollTrendVals.length > 0
-      ? payrollTrendVals.reduce((sum, n) => sum + n, 0) / payrollTrendVals.length
+      ? payrollTrendVals.reduce((sum, n) => sum + n, 0) /
+        payrollTrendVals.length
       : 0;
 
+  // KPIs
   const salesActual = latestRow.Sales_Actual || 0;
   const salesBudget = latestRow.Sales_Budget || 0;
   const salesLastYear = latestRow.Sales_LastYear || 0;
@@ -284,13 +305,17 @@ function computeInsightsBundle(rows: any[]) {
   };
 }
 
-// figure out allowed locations by role
+// role -> which tabs you can view
 function computeAllowedLocationsForProfile(profile: any) {
   if (!profile) return [];
   const roleLower = (profile.role || "").toLowerCase();
   const home = profile.home_location;
 
-  if (roleLower === "admin" || roleLower === "operation" || roleLower === "ops") {
+  if (
+    roleLower === "admin" ||
+    roleLower === "operation" ||
+    roleLower === "ops"
+  ) {
     return [
       "GroupOverview",
       "La Mia Mamma (Brand)",
@@ -304,12 +329,11 @@ function computeAllowedLocationsForProfile(profile: any) {
     return [home];
   }
 
-  // fallback, just in case
   return [home].filter(Boolean);
 }
 
 // ─────────────────────────
-// main component
+// PAGE COMPONENT
 // ─────────────────────────
 
 export default function FinancialPage() {
@@ -318,16 +342,16 @@ export default function FinancialPage() {
   const [profile, setProfile] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // access control
+  // permissions
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
   const [initialLocation, setInitialLocation] = useState<string>("");
 
-  // ui state
+  // UI
   const [location, setLocation] = useState<string>("");
   const [period, setPeriod] = useState<string>("Week");
   const [activeTab, setActiveTab] = useState<string>("Sales");
 
-  // data state
+  // data
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState("");
@@ -335,10 +359,10 @@ export default function FinancialPage() {
 
   const [currentWeekNow] = useState(getCurrentWeekLabel());
 
-  // get session + stay in sync
+  // keep session synced
   useEffect(() => {
     let sub: any;
-    async function init() {
+    (async () => {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -355,15 +379,14 @@ export default function FinancialPage() {
         }
       );
       sub = listener;
-    }
-    init();
+    })();
 
     return () => {
       if (sub) sub.subscription.unsubscribe();
     };
   }, []);
 
-  // load profile row from Supabase
+  // load profile
   useEffect(() => {
     async function loadProfile() {
       if (!session) {
@@ -410,17 +433,17 @@ export default function FinancialPage() {
     await supabase.auth.signOut();
   }
 
-  // pick default location once allowedLocations are known
+  // pick first allowed location once we know it
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // Week -> Period,Quarter map
+  // build map Week->Period/Quarter once
   const WEEK_TO_PERIOD_QUARTER = useMemo(buildWeekToPeriodQuarter, []);
 
-  // decorate rows with Period + Quarter
+  // decorate rows with Period + Quarter labels
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || "").trim();
@@ -433,11 +456,10 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // build grouped data for "Period" / "Quarter" dropdown
+  // group data when Period/Quarter is selected
   function groupMergedRowsBy(bucketKey: "Period" | "Quarter") {
     if (!mergedRows.length) return [];
     const grouped: Record<string, any[]> = {};
-
     for (const row of mergedRows) {
       const key = row[bucketKey];
       if (!grouped[key]) grouped[key] = [];
@@ -473,7 +495,7 @@ export default function FinancialPage() {
     [mergedRows]
   );
 
-  // fetch rows any time location changes (brand / group / site)
+  // fetch rows for selected location / brand / group
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -488,11 +510,10 @@ export default function FinancialPage() {
           const allData = await Promise.all(
             BRAND_GROUPS[location].map((site) => fetchTab(site))
           );
-          rows = rollupBy(allData.flat(), "Week");
+          rows = rollupByWeek(allData.flat());
         } else {
-          // "GroupOverview" or a single site tab
+          // "GroupOverview" or an individual site
           rows = await fetchTab(location);
-          // keep them sorted
           rows.sort(
             (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
           );
@@ -515,7 +536,7 @@ export default function FinancialPage() {
     load();
   }, [location]);
 
-  // build rankingData only for admin/ops
+  // compute ranking table for admin/ops
   useEffect(() => {
     async function buildRanking() {
       if (
@@ -582,7 +603,7 @@ export default function FinancialPage() {
     buildRanking();
   }, [roleLower]);
 
-  // chart config
+  // chart formatting helpers
   const chartConfig = {
     Sales: [
       { key: "Sales_Actual", color: "#4ade80", name: "Actual" },
@@ -616,86 +637,30 @@ export default function FinancialPage() {
     return ["£" + Number(value).toLocaleString(), name];
   };
 
-  // guards
+  // ─────────────────────────
+  // AUTH GUARDS
+  // ─────────────────────────
+
   if (authLoading) {
     return (
-      <div
-        style={{
-          minHeight: "80vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
-          color: "#6b7280",
-          fontSize: "0.9rem",
-          fontWeight: 500,
-        }}
-      >
-        Loading profile…
+      <div style={centerWrap}>
+        <div style={mutedText}>Loading profile…</div>
       </div>
     );
   }
 
   if (!session || !profile) {
     return (
-      <div
-        style={{
-          minHeight: "80vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            backgroundColor: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "0.75rem",
-            padding: "1rem 1.25rem",
-            maxWidth: "320px",
-            textAlign: "center",
-            color: "#dc2626",
-            fontWeight: 500,
-            fontSize: "0.9rem",
-            lineHeight: 1.4,
-            boxShadow:
-              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-          }}
-        >
-          You are not signed in.
-        </div>
+      <div style={centerWrap}>
+        <div style={denyBox}>You are not signed in.</div>
       </div>
     );
   }
 
   if (!canViewFinance) {
     return (
-      <div
-        style={{
-          minHeight: "80vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            backgroundColor: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "0.75rem",
-            padding: "1rem 1.25rem",
-            maxWidth: "320px",
-            textAlign: "center",
-            color: "#dc2626",
-            fontWeight: 500,
-            fontSize: "0.9rem",
-            lineHeight: 1.4,
-            boxShadow:
-              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-          }}
-        >
+      <div style={centerWrap}>
+        <div style={denyBox}>
           You don&apos;t have permission to view Financial Performance.
         </div>
       </div>
@@ -704,38 +669,17 @@ export default function FinancialPage() {
 
   if (!allowedLocations.length || !initialLocation) {
     return (
-      <div
-        style={{
-          minHeight: "80vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            backgroundColor: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "0.75rem",
-            padding: "1rem 1.25rem",
-            maxWidth: "320px",
-            textAlign: "center",
-            color: "#dc2626",
-            fontWeight: 500,
-            fontSize: "0.9rem",
-            lineHeight: 1.4,
-            boxShadow:
-              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-          }}
-        >
+      <div style={centerWrap}>
+        <div style={denyBox}>
           No location access configured for this account.
         </div>
       </div>
     );
   }
 
-  // MAIN RENDER
+  // ─────────────────────────
+  // PAGE RENDER
+  // ─────────────────────────
   return (
     <div
       style={{
@@ -745,7 +689,7 @@ export default function FinancialPage() {
         color: "#111827",
       }}
     >
-      {/* header bar (like portal header style, inline to avoid globals) */}
+      {/* HEADER BAR (matches portal look, inline styles so no globals) */}
       <header
         style={{
           width: "100%",
@@ -817,7 +761,7 @@ export default function FinancialPage() {
             </Link>
           </div>
 
-          {/* right: role + logout */}
+          {/* right: user / role / logout */}
           <div
             style={{
               display: "flex",
@@ -879,7 +823,7 @@ export default function FinancialPage() {
         </div>
       </header>
 
-      {/* controls row */}
+      {/* CONTROLS ROW (location + period) */}
       <section
         style={{
           maxWidth: "1280px",
@@ -892,7 +836,7 @@ export default function FinancialPage() {
           padding: "0 1rem",
         }}
       >
-        {/* Title + Week */}
+        {/* Title + current week */}
         <div style={{ flex: "1 1 auto", minWidth: "200px" }}>
           <div
             style={{
@@ -1020,14 +964,7 @@ export default function FinancialPage() {
         </div>
       </section>
 
-      {/* Insights */}
-      <InsightsBar
-        insights={insights}
-        currentWeekNow={currentWeekNow}
-        payrollTarget={PAYROLL_TARGET}
-      />
-
-      {/* Compliance (RENDERED ONCE HERE ONLY) */}
+      {/* 🔥 ONLY ONE BAR NOW: ComplianceBar does the “last week snapshot + dot” */}
       <ComplianceBar
         insights={insights}
         payrollTarget={PAYROLL_TARGET}
@@ -1035,7 +972,7 @@ export default function FinancialPage() {
         drinkTarget={DRINK_TARGET}
       />
 
-      {/* Ranking for admin/ops only */}
+      {/* Ranking (admin / ops only) */}
       {(roleLower === "admin" ||
         roleLower === "operation" ||
         roleLower === "ops") &&
@@ -1058,7 +995,7 @@ export default function FinancialPage() {
         />
       )}
 
-      {/* Chart tab buttons */}
+      {/* Tab buttons for chart */}
       <div
         style={{
           display: "flex",
@@ -1074,7 +1011,8 @@ export default function FinancialPage() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             style={{
-              backgroundColor: activeTab === tab ? "#111827" : "#fff",
+              backgroundColor:
+                activeTab === tab ? "#111827" : "#fff",
               color: activeTab === tab ? "#fff" : "#111827",
               border: "1px solid #d1d5db",
               borderRadius: "0.5rem",
@@ -1106,7 +1044,7 @@ export default function FinancialPage() {
         />
       )}
 
-      {/* Errors / loading states under main content */}
+      {/* Feedback when loading or error */}
       {loadingData && (
         <p
           style={{
@@ -1136,3 +1074,32 @@ export default function FinancialPage() {
     </div>
   );
 }
+
+// tiny inline styles for loading/error layouts
+const centerWrap: React.CSSProperties = {
+  minHeight: "80vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontFamily: "Inter, system-ui, sans-serif",
+};
+const denyBox: React.CSSProperties = {
+  backgroundColor: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: "0.75rem",
+  padding: "1rem 1.25rem",
+  maxWidth: "320px",
+  textAlign: "center",
+  color: "#dc2626",
+  fontWeight: 500,
+  fontSize: "0.9rem",
+  lineHeight: 1.4,
+  boxShadow:
+    "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+};
+const mutedText: React.CSSProperties = {
+  color: "#6b7280",
+  fontSize: "0.9rem",
+  lineHeight: 1.4,
+  fontWeight: 500,
+};
