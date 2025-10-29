@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-
-import { useRouter } from "next/router";
+// src/pages/financial.js
+import React, { useEffect, useState, useMemo } from "react";
 import {
   LineChart,
   Line,
@@ -14,19 +13,25 @@ import { CSVLink } from "react-csv";
 
 import { supabase } from "../lib/supabaseClient";
 
-import Header from "..components/financial/FinancialFooter";
-import Footer from "./FinancialFooter";
+import FinancialHeader from "../components/financial/FinancialHeader";
+import FinancialFooter from "../components/financial/FinancialFooter";
+import InsightsBar from "../components/financial/InsightsBar";
+import ComplianceBar from "../components/financial/ComplianceBar";
+import RankingTable from "../components/financial/RankingTable";
+import KPIBlock from "../components/financial/KPIBlock";
+import ChartSection from "../components/financial/ChartSection";
 
-// ENV fallbacks (you can still override via .env.local)
+// ───────────────────────────────────
+// CONFIG
+// ───────────────────────────────────
 const API_KEY =
-  process.env.REACT_APP_GOOGLE_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
   "AIzaSyB_dkFpvk6w_d9dPD_mWVhfB8-lly-9FS8";
 
 const SPREADSHEET_ID =
-  process.env.REACT_APP_SHEET_ID ||
+  process.env.NEXT_PUBLIC_SHEET_ID ||
   "1PPVSEcZ6qLOEK2Z0uRLgXCnS_maazWFO_yMY648Oq1g";
 
-// Brand group rollups (virtual locations)
 const BRAND_GROUPS = {
   "La Mia Mamma (Brand)": [
     "La Mia Mamma - Chelsea",
@@ -44,7 +49,6 @@ const BRAND_GROUPS = {
   ],
 };
 
-// Physical store locations (for ranking table)
 const STORE_LOCATIONS = [
   "La Mia Mamma - Chelsea",
   "La Mia Mamma - Hollywood Road",
@@ -56,31 +60,28 @@ const STORE_LOCATIONS = [
   "Made in Italy - Battersea",
 ];
 
-const TABS = ["Sales", "Payroll", "Food", "Drink"];
 const PERIODS = ["Week", "Period", "Quarter"];
+const TABS = ["Sales", "Payroll", "Food", "Drink"];
 
-// Targets you gave me
 const PAYROLL_TARGET = 35; // %
 const FOOD_TARGET = 12.5; // %
 const DRINK_TARGET = 5.5; // %
 
-/* -----------------
-   Helper functions
-------------------*/
-
-// format £ nicely
+// ───────────────────────────────────
+// HELPERS
+// ───────────────────────────────────
 function formatCurrency(val) {
   if (val === undefined || val === null || isNaN(val)) return "-";
   return "£" + Number(val).toLocaleString();
 }
 
-// "W44" → 44
+// W43 -> 43
 function parseWeekNum(weekStr) {
   const num = parseInt(String(weekStr || "").replace(/[^\d]/g, ""), 10);
   return isNaN(num) ? 0 : num;
 }
 
-// Roll up an array of rows by some key ("Week"). Used to aggregate brand sites together.
+// average / rollup for brands
 function rollupBy(rows, bucketKey) {
   if (!rows.length) return [];
 
@@ -113,45 +114,108 @@ function rollupBy(rows, bucketKey) {
   return combined;
 }
 
-// Build the insight card from the latest completed week in the data
+// ISO week calculation (Mon-Sun style you were already using)
+function getISOWeek(date = new Date()) {
+  const d = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  );
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  // cap at 52 so we don't see W53 weirdness
+  return weekNo > 52 ? 52 : weekNo;
+}
+
+// "W43"
+function getCurrentWeekLabel() {
+  return `W${getISOWeek(new Date())}`;
+}
+
+// pure number for easier math, ex 44
+function getCurrentWeekNumber() {
+  return getISOWeek(new Date());
+}
+
+// parse "3.5%" or "-2%" -> signed float 3.5 or -2
+function parsePayrollVar(val) {
+  if (val === undefined || val === null) return 0;
+  const cleaned = String(val).replace("%", "").trim();
+  const num = parseFloat(cleaned);
+  return Number.isNaN(num) ? 0 : num;
+}
+
+// take mergedRows and find snapshot of the LAST COMPLETED WEEK
+// (currentWeek-1, fallback backwards), and compute the KPIs used
+// in InsightsBar + KPI cards
 function computeLatestWeekInsights(mergedRows) {
   if (!mergedRows || mergedRows.length === 0) return null;
 
-  // last (highest) week number
   const sorted = [...mergedRows].sort(
     (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
   );
-  const latest = sorted[sorted.length - 1];
-  if (!latest) return null;
 
-  const wkLabel = latest.Week;
+  const currentWeekNum = getCurrentWeekNumber(); // e.g. 44
+  const targetWeekNum =
+    currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1; // e.g. 43
 
-  const salesActual = latest.Sales_Actual || 0;
-  const salesBudget = latest.Sales_Budget || 0;
-  const salesLastYear = latest.Sales_LastYear || 0;
+  function rowHasData(r) {
+    return (
+      (r.Sales_Actual && r.Sales_Actual !== 0) ||
+      (r.Payroll_Actual && r.Payroll_Actual !== 0) ||
+      (r.Sales_Budget && r.Sales_Budget !== 0)
+    );
+  }
 
-  // Sales vs Budget (money + %)
+  // try exact match
+  let chosen = sorted.find(
+    (r) => parseWeekNum(r.Week) === targetWeekNum && rowHasData(r)
+  );
+
+  // fallback: last <= targetWeekNum
+  if (!chosen) {
+    const poss = sorted.filter(
+      (r) => parseWeekNum(r.Week) <= targetWeekNum && rowHasData(r)
+    );
+    if (poss.length > 0) {
+      chosen = poss[poss.length - 1];
+    }
+  }
+
+  // final fallback: last row with any data
+  if (!chosen) {
+    const poss = sorted.filter((r) => rowHasData(r));
+    if (poss.length > 0) {
+      chosen = poss[poss.length - 1];
+    }
+  }
+
+  if (!chosen) return null;
+
+  const wkLabel = chosen.Week; // "W43"
+  const salesActual = chosen.Sales_Actual || 0;
+  const salesBudget = chosen.Sales_Budget || 0;
+  const salesLastYear = chosen.Sales_LastYear || 0;
+
   const salesVar = salesActual - salesBudget;
   const salesVarPct =
     salesBudget !== 0 ? (salesVar / salesBudget) * 100 : 0;
 
-  // Payroll %, Food %, Drink % of sales
   const payrollPct =
     salesActual !== 0
-      ? (latest.Payroll_Actual / salesActual) * 100
+      ? (chosen.Payroll_Actual / salesActual) * 100
       : 0;
 
   const foodPct =
     salesActual !== 0
-      ? (latest.Food_Actual / salesActual) * 100
+      ? (chosen.Food_Actual / salesActual) * 100
       : 0;
 
   const drinkPct =
     salesActual !== 0
-      ? (latest.Drink_Actual / salesActual) * 100
+      ? (chosen.Drink_Actual / salesActual) * 100
       : 0;
 
-  // Sales vs Last Year %
   const salesVsLastYearPct =
     salesLastYear !== 0
       ? ((salesActual - salesLastYear) / salesLastYear) * 100
@@ -159,77 +223,247 @@ function computeLatestWeekInsights(mergedRows) {
 
   return {
     wkLabel,
-
-    // InsightsBar usage
     salesActual,
     salesBudget,
     salesVar,
     salesVarPct,
     payrollPct,
-
-    // ComplianceBar usage
     foodPct,
     drinkPct,
     salesVsLastYearPct,
   };
 }
 
-// ISO week number (Mon start). We use this so "Current Week" auto-updates every Monday.
-function getISOWeek(date = new Date()) {
-  // clone date in UTC so time zones don't break week rollover
-  const d = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+// computePayrollCompliance(mergedRows)
+// - figures out last completed week (same as above)
+// - looks at that and previous 3 weeks
+// - takes Payroll_v% from each
+// - computes SIGNED average
+// - uses ABS(average) for traffic light
+function computePayrollCompliance(mergedRows) {
+  if (!mergedRows || mergedRows.length === 0) return null;
+
+  const sorted = [...mergedRows].sort(
+    (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
   );
 
-  // ISO logic: week starts Monday, week 1 is the week containing Jan 4
-  const dayNum = d.getUTCDay() || 7; // Sunday -> 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const currentWeekNum = getCurrentWeekNumber();
+  const targetWeekNum =
+    currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  function hasRealData(r) {
+    return (
+      (r.Sales_Actual && r.Sales_Actual !== 0) ||
+      (r.Payroll_Actual && r.Payroll_Actual !== 0)
+    );
+  }
 
-  return weekNo;
+  // pick the "snapshot" row similar to computeLatestWeekInsights
+  let snap = sorted.find(
+    (r) => parseWeekNum(r.Week) === targetWeekNum && hasRealData(r)
+  );
+  if (!snap) {
+    const poss = sorted.filter(
+      (r) => parseWeekNum(r.Week) <= targetWeekNum && hasRealData(r)
+    );
+    if (poss.length > 0) {
+      snap = poss[poss.length - 1];
+    }
+  }
+  if (!snap) {
+    const poss = sorted.filter((r) => hasRealData(r));
+    if (poss.length > 0) {
+      snap = poss[poss.length - 1];
+    }
+  }
+  if (!snap) return null;
+
+  const snapWeekNum = parseWeekNum(snap.Week);
+  const wkLabel = snap.Week || `W${snapWeekNum}`;
+
+  const windowWeeks = [
+    snapWeekNum,
+    snapWeekNum - 1,
+    snapWeekNum - 2,
+    snapWeekNum - 3,
+  ].filter((n) => n > 0);
+
+  const windowRows = sorted.filter((r) =>
+    windowWeeks.includes(parseWeekNum(r.Week))
+  );
+
+  // grab Payroll_v% from those rows
+  const signedVals = windowRows.map((r) =>
+    parsePayrollVar(r["Payroll_v%"])
+  );
+
+  if (signedVals.length === 0) {
+    return {
+      wkLabel,
+      avgAbs: 0,
+      colourClass: "green",
+    };
+  }
+
+  const avgSigned =
+    signedVals.reduce((sum, v) => sum + v, 0) / signedVals.length;
+
+  const mag = Math.abs(avgSigned);
+
+  let colourClass = "green";
+  if (mag >= 1 && mag < 2) {
+    colourClass = "amber";
+  } else if (mag >= 2) {
+    colourClass = "red";
+  }
+
+  return {
+    wkLabel,      // the "W43" we want to show next to the dot
+    avgAbs: mag,  // mostly for debugging, not shown
+    colourClass,  // "green" | "amber" | "red"
+  };
 }
 
-function getCurrentWeekLabel() {
-  let wk = getISOWeek(new Date());
-  if (wk > 52) wk = 52; // safety cap
-  return `W${wk}`;
+// compute which locations/brands the logged-in profile can see
+function computeAllowedLocationsForProfile(profile) {
+  if (!profile) return [];
+  const roleLower = (profile.role || "").toLowerCase();
+  const home = profile.home_location;
+
+  if (roleLower === "admin" || roleLower === "operation") {
+    return [
+      "GroupOverview",
+      "La Mia Mamma (Brand)",
+      "Fish and Bubbles (Brand)",
+      "Made in Italy (Brand)",
+      "La Mia Mamma - Chelsea",
+      "La Mia Mamma - Hollywood Road",
+      "La Mia Mamma - Notting Hill",
+      "La Mia Mamma - Battersea",
+      "Fish and Bubbles - Fulham",
+      "Fish and Bubbles - Notting Hill",
+      "Made in Italy - Chelsea",
+      "Made in Italy - Battersea",
+    ];
+  }
+
+  if (roleLower === "manager") {
+    return [home];
+  }
+
+  return [];
 }
 
-/* ---------------
-   MAIN COMPONENT
-----------------*/
+// ───────────────────────────────────
+// PAGE COMPONENT
+// ───────────────────────────────────
+export default function FinancialPage() {
+  //
+  // 1. AUTH / PROFILE
+  //
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-function App({ allowedLocations, initialLocation, profile, onSignOut }) {
-  // location currently selected in dropdown
-  // NOTE: we do NOT resync back to initialLocation every time.
-  // That was the bug that forced you back to GroupOverview.
-  const [location, setLocation] = useState(initialLocation || "");
+  const [allowedLocations, setAllowedLocations] = useState([]);
+  const [initialLocation, setInitialLocation] = useState("");
 
-  // rows from sheet (for the selected view OR rollup brand)
+  useEffect(() => {
+    let sub;
+    async function init() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setSession(session);
+
+      const { data: listener } = supabase.auth.onAuthStateChange(
+        (_event, newSession) => {
+          setSession(newSession);
+          if (!newSession) {
+            setProfile(null);
+            setAllowedLocations([]);
+            setInitialLocation("");
+          }
+        }
+      );
+      sub = listener;
+    }
+    init();
+
+    return () => {
+      if (sub) sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadProfile() {
+      if (!session) {
+        setAuthLoading(false);
+        return;
+      }
+
+      setAuthLoading(true);
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name, role, home_location")
+        .eq("id", session.user.id)
+        .single();
+
+      if (error) {
+        console.error("profile load error", error);
+        setProfile(null);
+        setAllowedLocations([]);
+        setInitialLocation("");
+        setAuthLoading(false);
+        return;
+      }
+
+      setProfile(data);
+
+      const locs = computeAllowedLocationsForProfile(data);
+      setAllowedLocations(locs);
+      setInitialLocation(locs[0] || "");
+
+      setAuthLoading(false);
+    }
+
+    loadProfile();
+  }, [session]);
+
+  const roleLower = (profile?.role || "").toLowerCase();
+  const canViewFinance =
+    roleLower === "admin" ||
+    roleLower === "operation" ||
+    roleLower === "manager";
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+  }
+
+  //
+  // 2. DASHBOARD STATE
+  //
+  const [location, setLocation] = useState("");
   const [rawRows, setRawRows] = useState([]);
-
-  // chart tab (Sales / Payroll / Food / Drink)
   const [activeTab, setActiveTab] = useState("Sales");
-
-  // period granularity (Week / Period / Quarter)
   const [period, setPeriod] = useState("Week");
-
-  // loading + error for selected view
-  const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState("");
-
-  // admin/ops ranking data across all sites
   const [rankingData, setRankingData] = useState([]);
 
-  // current week label (auto, e.g. "W44")
   const [currentWeekNow] = useState(getCurrentWeekLabel());
 
-  // Week -> Period / Quarter mapping (1..52 weeks)
+  useEffect(() => {
+    if (!location && initialLocation) {
+      setLocation(initialLocation);
+    }
+  }, [initialLocation, location]);
+
+  // map week->period->quarter (for grouping when period !== "Week")
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return Array.from({ length: 52 }, (_, i) => {
-      const w = i + 1; // week number 1..52
+      const w = i + 1;
       let periodVal;
       let quarter;
       if (w <= 13) {
@@ -249,16 +483,13 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
     });
   }, []);
 
-  // convert Google Sheets "values" into objects
+  // parse a Google Sheet tab into rows of objects
   function parseSheetValues(values) {
     if (!values || values.length < 2) return [];
     const [headers, ...rows] = values;
-
     return rows.map((row) =>
       headers.reduce((obj, key, idx) => {
         let value = row[idx];
-
-        // LocationBreakdown sometimes contains JSON
         if (key === "LocationBreakdown" && typeof value === "string") {
           try {
             value = JSON.parse(value);
@@ -266,17 +497,15 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
             value = {};
           }
         } else if (!isNaN(value)) {
-          // convert numeric string to number
           value = Number(value);
         }
-
         obj[key] = value;
         return obj;
       }, {})
     );
   }
 
-  // fetch a single sheet tab by name
+  // call Sheets API for a specific tab
   async function fetchTab(tabName) {
     const range = `${tabName}!A1:Z100`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(
@@ -291,24 +520,24 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
     return parseSheetValues(json.values);
   }
 
-  // load data for the selected dropdown location
+  // load rawRows whenever location changes
   useEffect(() => {
     async function load() {
       if (!location) return;
       try {
-        setLoading(true);
+        setLoadingData(true);
         setFetchError("");
 
-        const brandMembers = BRAND_GROUPS[location];
+        const isBrand = BRAND_GROUPS[location];
         let rows;
-        if (brandMembers) {
-          // brand view: sum all sites in that brand by Week
+        if (isBrand) {
+          // brand => merge multiple tabs
           const allData = await Promise.all(
-            brandMembers.map((siteTab) => fetchTab(siteTab))
+            BRAND_GROUPS[location].map((site) => fetchTab(site))
           );
           rows = rollupBy(allData.flat(), "Week");
         } else {
-          // single site OR "GroupOverview"
+          // single site or GroupOverview
           rows = await fetchTab(location);
         }
 
@@ -320,19 +549,18 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         );
         setRawRows([]);
       } finally {
-        setLoading(false);
+        setLoadingData(false);
       }
     }
 
     load();
   }, [location]);
 
-  // add Period + Quarter to each row
+  // mergedRows = rawRows plus Period / Quarter labels
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
-      const w = String(item.Week || "").trim(); // e.g. "W44"
-      const match = WEEK_TO_PERIOD_QUARTER.find((e) => e.week === w);
-
+      const w = String(item.Week || "").trim();
+      const match = WEEK_TO_PERIOD_QUARTER.find((x) => x.week === w);
       return {
         ...item,
         Period: match?.period || "P?",
@@ -341,7 +569,7 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group if user selects Period or Quarter
+  // group data by Period or Quarter if user changes the dropdown
   function groupMergedRowsBy(bucketKey) {
     if (!mergedRows.length) return [];
 
@@ -362,7 +590,7 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         sums[col] = rows.reduce((total, r) => total + (r[col] || 0), 0);
       });
       return {
-        Week: label, // for chart x-axis (Period or Quarter label)
+        Week: label,
         ...sums,
       };
     });
@@ -376,81 +604,79 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRows, period]);
 
-  // last-week metrics for current selection (Insights + Compliance)
+  // high-level "last completed week" snapshot for InsightsBar and KPIBlock
   const insights = useMemo(
     () => computeLatestWeekInsights(mergedRows),
     [mergedRows]
   );
 
-  // Ranking data: only for admin / operation
+  // complianceSnapshot for ComplianceBar (dot colour + correct W##)
+  const complianceSnapshot = useMemo(
+    () => computePayrollCompliance(mergedRows),
+    [mergedRows]
+  );
+
+  // ranking table = payroll watchlist for ops/admin
   useEffect(() => {
-    async function buildRanking() {
-      const roleLower = (profile?.role || "").toLowerCase();
-      if (roleLower !== "admin" && roleLower !== "operation") {
-        setRankingData([]);
-        return;
-      }
-
-      try {
-        const result = await Promise.all(
-          STORE_LOCATIONS.map(async (loc) => {
-            const rows = await fetchTab(loc);
-            if (!rows || rows.length === 0) return null;
-
-            // pick latest week row in that store
-            const sorted = [...rows].sort(
-              (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
-            );
-            const latest = sorted[sorted.length - 1];
-            if (!latest) return null;
-
-            const salesActual = latest.Sales_Actual || 0;
-            const salesBudget = latest.Sales_Budget || 0;
-
-            const payrollPct =
-              salesActual !== 0
-                ? (latest.Payroll_Actual / salesActual) * 100
-                : 0;
-
-            const foodPct =
-              salesActual !== 0
-                ? (latest.Food_Actual / salesActual) * 100
-                : 0;
-
-            const drinkPct =
-              salesActual !== 0
-                ? (latest.Drink_Actual / salesActual) * 100
-                : 0;
-
-            const salesVar = salesActual - salesBudget; // £ over/under budget
-
-            return {
-              location: loc,
-              week: latest.Week,
-              payrollPct,
-              foodPct,
-              drinkPct,
-              salesVar,
-            };
-          })
-        );
-
-        const cleaned = result.filter(Boolean);
-
-        // sort worst first by payroll %, since payroll drift hurts fastest
-        cleaned.sort((a, b) => b.payrollPct - a.payrollPct);
-
-        setRankingData(cleaned);
-      } catch (err) {
-        console.error("Ranking build failed:", err);
-        setRankingData([]);
-      }
+  async function buildRanking() {
+    if (roleLower !== "admin" && roleLower !== "operation") {
+      setRankingData([]);
+      return;
     }
 
-    buildRanking();
-  }, [profile]);
+    try {
+      const result = await Promise.all(
+        STORE_LOCATIONS.map(async (loc) => {
+          // fetch the site data for this specific store
+          const rows = await fetchTab(loc);
+          if (!rows || rows.length === 0) return null;
 
-  // chart lines config
+          // USE THE SAME LOGIC AS THE MAIN DASHBOARD:
+          // pick last completed week (currentWeek-1, etc.)
+          const snap = computeLatestWeekInsights(rows);
+          if (!snap) return null;
+
+          const {
+            wkLabel,
+            salesActual,
+            salesBudget,
+            payrollPct,
+            foodPct,
+            drinkPct,
+          } = snap;
+
+          // var to budget in £ for interest
+          const salesVar = (salesActual || 0) - (salesBudget || 0);
+
+          return {
+            location: loc,
+            week: wkLabel,        // e.g. "W43" (not fake W52)
+            payrollPct: payrollPct || 0,
+            foodPct: foodPct || 0,
+            drinkPct: drinkPct || 0,
+            salesVar,
+          };
+        })
+      );
+
+      // clean nulls
+      const cleaned = result.filter(Boolean);
+
+      // sort by WORST payroll first = highest payroll%
+      cleaned.sort((a, b) => b.payrollPct - a.payrollPct);
+
+      setRankingData(cleaned);
+    } catch (err) {
+      console.error("Ranking build failed:", err);
+      setRankingData([]);
+    }
+  }
+
+  buildRanking();
+}, [roleLower]);
+
+
+  // chart config
   const chartConfig = {
     Sales: [
       { key: "Sales_Actual", color: "#4ade80", name: "Actual" },
@@ -474,23 +700,58 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
     ],
   };
 
-  // £ formatting on y-axis
   const yTickFormatter = (val) => {
     if (val === 0) return "£0";
     if (!val) return "";
     return "£" + Number(val).toLocaleString();
   };
 
-  // tooltip styling for the chart
   const tooltipFormatter = (value, name) => {
     return [formatCurrency(value), name];
   };
 
-  // role convenience
-  const roleLower = (profile?.role || "").toLowerCase();
-  const isOpsOrAdmin =
-    roleLower === "admin" || roleLower === "operation";
+  // ───────────────────────────────────
+  // RENDER GUARDS
+  // ───────────────────────────────────
+  if (authLoading) {
+    return (
+      <div style={centerBox}>
+        <div style={mutedText}>Loading profile…</div>
+      </div>
+    );
+  }
 
+  if (!session || !profile) {
+    return (
+      <div style={centerBox}>
+        <div style={denyBox}>You are not signed in.</div>
+      </div>
+    );
+  }
+
+  if (!canViewFinance) {
+    return (
+      <div style={centerBox}>
+        <div style={denyBox}>
+          You don&apos;t have permission to view Financial Performance.
+        </div>
+      </div>
+    );
+  }
+
+  if (!allowedLocations.length || !initialLocation) {
+    return (
+      <div style={centerBox}>
+        <div style={denyBox}>
+          No location access configured for this account.
+        </div>
+      </div>
+    );
+  }
+
+  // ───────────────────────────────────
+  // MAIN PAGE
+  // ───────────────────────────────────
   return (
     <div
       style={{
@@ -500,10 +761,9 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         color: "#111827",
       }}
     >
-      {/* Header / Filters / User */}
-      <Header
+      <FinancialHeader
         profile={profile}
-        onSignOut={onSignOut}
+        onSignOut={handleSignOut}
         allowedLocations={allowedLocations}
         location={location}
         setLocation={setLocation}
@@ -512,29 +772,33 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         PERIODS={PERIODS}
       />
 
-      {/* Insights: "what week are we in" + last week summary */}
-      <InsightsBar insights={insights} currentWeekNow={currentWeekNow} />
+      {/* LAST WEEK SNAPSHOT BAR */}
+      <InsightsBar
+        insights={insights}
+        currentWeekNow={currentWeekNow}
+        payrollTarget={PAYROLL_TARGET}
+      />
 
-      {/* Compliance targets strip with ✅ / ❌ using YOUR targets */}
+      {/* COMPLIANCE BAR with coloured dot + last completed week */}
       <ComplianceBar
         insights={insights}
         payrollTarget={PAYROLL_TARGET}
         foodTarget={FOOD_TARGET}
         drinkTarget={DRINK_TARGET}
+        complianceSnapshot={complianceSnapshot}
       />
 
-      {/* Ranking table (admins / ops only) */}
-      {isOpsOrAdmin && rankingData.length > 0 && (
-        <RankingTable
-          rankingData={rankingData}
-          payrollTarget={PAYROLL_TARGET}
-          foodTarget={FOOD_TARGET}
-          drinkTarget={DRINK_TARGET}
-        />
-      )}
+      {(roleLower === "admin" || roleLower === "operation") &&
+        rankingData.length > 0 && (
+          <RankingTable
+            rankingData={rankingData}
+            payrollTarget={PAYROLL_TARGET}
+            foodTarget={FOOD_TARGET}
+            drinkTarget={DRINK_TARGET}
+          />
+        )}
 
-      {/* Loading / errors for the currently selected location */}
-      {loading && (
+      {loadingData && (
         <p
           style={{
             textAlign: "center",
@@ -546,7 +810,7 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         </p>
       )}
 
-      {!loading && fetchError && (
+      {!loadingData && fetchError && (
         <p
           style={{
             textAlign: "center",
@@ -559,8 +823,7 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         </p>
       )}
 
-      {/* KPI cards (rollup for whatever period=Week/Period/Quarter is selected) */}
-      {!loading && !fetchError && (
+      {!loadingData && !fetchError && (
         <KPIBlock
           data={filteredData}
           payrollTarget={PAYROLL_TARGET}
@@ -569,7 +832,7 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
         />
       )}
 
-      {/* Tabs to switch chart metric */}
+      {/* tab buttons */}
       <div
         style={{
           display: "flex",
@@ -584,859 +847,73 @@ function App({ allowedLocations, initialLocation, profile, onSignOut }) {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`tab-button ${activeTab === tab ? "active" : ""}`}
+            style={{
+              backgroundColor:
+                activeTab === tab ? "#111827" : "#fff",
+              color: activeTab === tab ? "#fff" : "#111827",
+              border: "1px solid #d1d5db",
+              borderRadius: "0.5rem",
+              padding: "0.5rem 0.75rem",
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              lineHeight: 1.2,
+              cursor: "pointer",
+              boxShadow:
+                activeTab === tab
+                  ? "0 12px 24px rgba(0,0,0,0.4)"
+                  : "0 8px 16px rgba(0,0,0,0.05)",
+            }}
           >
             {tab}
           </button>
         ))}
       </div>
 
-      {/* Trend chart */}
-      {!loading && !fetchError && (
+      {!loadingData && !fetchError && (
         <ChartSection
           activeTab={activeTab}
           filteredData={filteredData}
           chartConfig={chartConfig}
           yTickFormatter={yTickFormatter}
           tooltipFormatter={tooltipFormatter}
+          CSVLink={CSVLink}
         />
       )}
 
-      <Footer />
+      <FinancialFooter />
     </div>
   );
 }
 
-/* ------------------------
-   InsightsBar (top strip)
--------------------------*/
+// ───────────────────────────────────
+// STYLE HELPERS for fallback states
+// ───────────────────────────────────
+const centerBox = {
+  minHeight: "80vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontFamily: "Inter, system-ui, sans-serif",
+};
 
-function InsightsBar({ insights, currentWeekNow }) {
-  if (!insights) return null;
+const denyBox = {
+  backgroundColor: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: "0.75rem",
+  padding: "1rem 1.25rem",
+  maxWidth: "320px",
+  textAlign: "center",
+  color: "#dc2626",
+  fontWeight: 500,
+  fontSize: "0.9rem",
+  lineHeight: 1.4,
+  boxShadow:
+    "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+};
 
-  const {
-    wkLabel,
-    salesActual,
-    salesBudget,
-    salesVar,
-    salesVarPct,
-    payrollPct,
-  } = insights;
-
-  const salesGood = salesVar >= 0;
-  const payrollGood = payrollPct <= PAYROLL_TARGET;
-
-  return (
-    <div
-      style={{
-        maxWidth: "1400px",
-        margin: "0 auto",
-        padding: "0 1rem",
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        gap: "1rem",
-        marginBottom: "1.5rem",
-      }}
-    >
-      {/* Current Week */}
-      <div
-        style={{
-          flex: "1 1 220px",
-          minWidth: "220px",
-          backgroundColor: "#fff",
-          borderRadius: "0.75rem",
-          border: "1px solid rgba(0,0,0,0.05)",
-          boxShadow:
-            "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-          padding: "1rem",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#4b5563",
-            marginBottom: "0.4rem",
-          }}
-        >
-          Current Week
-        </div>
-        <div
-          style={{
-            fontSize: "1.4rem",
-            fontWeight: 600,
-            color: "#111827",
-            lineHeight: 1.2,
-          }}
-        >
-          {currentWeekNow || "—"}
-        </div>
-        <div
-          style={{
-            fontSize: "0.75rem",
-            color: "#6b7280",
-            lineHeight: 1.4,
-            marginTop: "0.25rem",
-          }}
-        >
-          Today's trading period
-        </div>
-      </div>
-
-      {/* Last Week Summary */}
-      <div
-        style={{
-          flex: "1 1 320px",
-          minWidth: "280px",
-          backgroundColor: "#fff",
-          borderRadius: "0.75rem",
-          border: "1px solid rgba(0,0,0,0.05)",
-          boxShadow:
-            "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-          padding: "1rem",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#4b5563",
-            marginBottom: "0.4rem",
-            display: "flex",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            rowGap: "0.25rem",
-          }}
-        >
-          <span>Last Week Results</span>
-          <span
-            style={{
-              fontSize: "0.75rem",
-              fontWeight: 400,
-              color: "#6b7280",
-            }}
-          >
-            {wkLabel || "W-"}
-          </span>
-        </div>
-
-        {/* Sales vs Budget */}
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#4b5563",
-            marginBottom: "0.25rem",
-            lineHeight: 1.4,
-          }}
-        >
-          Sales vs Budget
-        </div>
-
-        <div
-          style={{
-            fontSize: "1rem",
-            fontWeight: 600,
-            lineHeight: 1.2,
-            color: salesGood ? "#059669" : "#dc2626",
-          }}
-        >
-          {salesVar >= 0 ? "+" : ""}
-          £{Math.round(salesVar).toLocaleString()}{" "}
-          <span
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              marginLeft: "0.4rem",
-              color: salesGood ? "#059669" : "#dc2626",
-            }}
-          >
-            ({salesVarPct >= 0 ? "+" : ""}
-            {salesVarPct.toFixed(1)}%)
-          </span>
-        </div>
-
-        <div
-          style={{
-            fontSize: "0.75rem",
-            color: "#6b7280",
-            lineHeight: 1.4,
-            marginTop: "0.25rem",
-            marginBottom: "0.75rem",
-          }}
-        >
-          Actual £{Math.round(salesActual).toLocaleString()} vs Budget £
-          {Math.round(salesBudget).toLocaleString()}
-        </div>
-
-        {/* Payroll % last week */}
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#4b5563",
-            marginBottom: "0.25rem",
-            lineHeight: 1.4,
-          }}
-        >
-          Payroll %
-        </div>
-
-        <div
-          style={{
-            fontSize: "1.25rem",
-            fontWeight: 600,
-            lineHeight: 1.2,
-            color: payrollGood ? "#059669" : "#dc2626",
-          }}
-        >
-          {payrollPct.toFixed(1)}%
-        </div>
-        <div
-          style={{
-            fontSize: "0.75rem",
-            color: "#6b7280",
-            lineHeight: 1.4,
-            marginTop: "0.25rem",
-          }}
-        >
-          Target ≤ {PAYROLL_TARGET}%
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* --------------------------
-   ComplianceBar (targets)
----------------------------*/
-
-function ComplianceBar({
-  insights,
-  payrollTarget,
-  foodTarget,
-  drinkTarget,
-}) {
-  if (!insights) return null;
-
-  const {
-    wkLabel,
-    payrollPct,
-    foodPct,
-    drinkPct,
-    salesVsLastYearPct,
-  } = insights;
-
-  // evaluate pass/fail using your new targets
-  const payrollOk = payrollPct <= payrollTarget;
-  const foodOk = foodPct <= foodTarget;
-  const drinkOk = drinkPct <= drinkTarget;
-  const lyOk = salesVsLastYearPct >= 0;
-
-  function MetricChip({ label, sub, value, suffix, ok }) {
-    return (
-      <div
-        style={{
-          flex: "1 1 200px",
-          minWidth: "200px",
-          backgroundColor: "#fff",
-          borderRadius: "0.75rem",
-          border: "1px solid rgba(0,0,0,0.05)",
-          boxShadow:
-            "0 16px 32px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.04)",
-          padding: "0.9rem 1rem",
-          fontFamily: "Inter, system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#4b5563",
-            marginBottom: "0.4rem",
-            lineHeight: 1.4,
-            display: "flex",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            rowGap: "0.25rem",
-          }}
-        >
-          <span>{label}</span>
-          {sub && (
-            <span
-              style={{
-                fontSize: "0.7rem",
-                fontWeight: 400,
-                color: "#6b7280",
-              }}
-            >
-              {sub}
-            </span>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            gap: "0.5rem",
-            lineHeight: 1.2,
-          }}
-        >
-          <div
-            style={{
-              fontSize: "1.25rem",
-              fontWeight: 600,
-              color: ok ? "#059669" : "#dc2626",
-            }}
-          >
-            {value}
-            {suffix}
-          </div>
-          <div
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              color: ok ? "#059669" : "#dc2626",
-              display: "flex",
-              alignItems: "center",
-              lineHeight: 1.2,
-            }}
-          >
-            {ok ? "✅" : "❌"}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        maxWidth: "1400px",
-        margin: "0 auto",
-        padding: "0 1rem",
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        gap: "1rem",
-        marginBottom: "1.5rem",
-      }}
-    >
-      <MetricChip
-        label="Payroll %"
-        sub={`${wkLabel || ""} • Target ≤ ${payrollTarget}%`}
-        value={payrollPct.toFixed(1)}
-        suffix="%"
-        ok={payrollOk}
-      />
-
-      <MetricChip
-        label="Food %"
-        sub={`${wkLabel || ""} • Target ≤ ${foodTarget}%`}
-        value={foodPct.toFixed(1)}
-        suffix="%"
-        ok={foodOk}
-      />
-
-      <MetricChip
-        label="Drink %"
-        sub={`${wkLabel || ""} • Target ≤ ${drinkTarget}%`}
-        value={drinkPct.toFixed(1)}
-        suffix="%"
-        ok={drinkOk}
-      />
-
-      <MetricChip
-        label="Sales vs LY"
-        sub={`${wkLabel || ""} • Target ≥ 0%`}
-        value={
-          salesVsLastYearPct >= 0
-            ? "+" + salesVsLastYearPct.toFixed(1)
-            : salesVsLastYearPct.toFixed(1)
-        }
-        suffix="%"
-        ok={lyOk}
-      />
-    </div>
-  );
-}
-
-/* --------------------------
-   RankingTable (admin/ops)
----------------------------*/
-
-function RankingTable({
-  rankingData,
-  payrollTarget,
-  foodTarget,
-  drinkTarget,
-}) {
-  if (!rankingData || rankingData.length === 0) return null;
-
-  function colorFor(val, target, inverse = false) {
-    // inverse=false => good if val <= target
-    // inverse=true  => good if val >= target
-    const ok = inverse ? val >= target : val <= target;
-    return {
-      color: ok ? "#059669" : "#dc2626",
-      ok,
-    };
-  }
-
-  return (
-    <div
-      style={{
-        maxWidth: "1400px",
-        margin: "0 auto 1.5rem auto",
-        padding: "0 1rem",
-      }}
-    >
-        <div
-          style={{
-            backgroundColor: "#fff",
-            borderRadius: "0.75rem",
-            border: "1px solid rgba(0,0,0,0.05)",
-            boxShadow:
-              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-            padding: "1rem 1rem 1.25rem",
-            fontFamily: "Inter, system-ui, sans-serif",
-          }}
-        >
-          <div
-            style={{
-              marginBottom: "0.75rem",
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-              rowGap: "0.5rem",
-              alignItems: "baseline",
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontSize: "1rem",
-                fontWeight: 600,
-                color: "#111827",
-                lineHeight: 1.3,
-              }}
-            >
-              Site Ranking (last week)
-            </h2>
-            <div
-              style={{
-                fontSize: "0.7rem",
-                color: "#6b7280",
-                lineHeight: 1.3,
-              }}
-            >
-              Sorted by highest Payroll %
-            </div>
-          </div>
-
-          <div
-            style={{
-              width: "100%",
-              overflowX: "auto",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: "0.8rem",
-                lineHeight: 1.4,
-                minWidth: "600px",
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    textAlign: "left",
-                    color: "#6b7280",
-                    fontWeight: 500,
-                    borderBottom: "1px solid #e5e7eb",
-                  }}
-                >
-                  <th
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Location
-                  </th>
-                  <th
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Payroll %
-                    <span style={{ fontWeight: 400, color: "#9ca3af" }}>
-                      {" "}
-                      (≤ {payrollTarget}%)
-                    </span>
-                  </th>
-                  <th
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Food %
-                    <span style={{ fontWeight: 400, color: "#9ca3af" }}>
-                      {" "}
-                      (≤ {foodTarget}%)
-                    </span>
-                  </th>
-                  <th
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Drink %
-                    <span style={{ fontWeight: 400, color: "#9ca3af" }}>
-                      {" "}
-                      (≤ {drinkTarget}%)
-                    </span>
-                  </th>
-                  <th
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Sales vs Budget
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankingData.map((row, idx) => {
-                  const payrollStyle = colorFor(
-                    row.payrollPct,
-                    payrollTarget
-                  );
-                  const foodStyle = colorFor(row.foodPct, foodTarget);
-                  const drinkStyle = colorFor(row.drinkPct, drinkTarget);
-                  const salesStyle = colorFor(row.salesVar, 0, true); // >=0 is good
-
-                  return (
-                    <tr
-                      key={idx}
-                      style={{
-                        borderBottom: "1px solid #e5e7eb",
-                        backgroundColor:
-                          idx === 0
-                            ? "rgba(220,38,38,0.03)" // highlight worst payroll
-                            : "transparent",
-                      }}
-                    >
-                      <td
-                        style={{
-                          padding: "0.75rem",
-                          fontWeight: 500,
-                          color: "#111827",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.location}
-                        <div
-                          style={{
-                            fontSize: "0.7rem",
-                            fontWeight: 400,
-                            color: "#9ca3af",
-                            lineHeight: 1.3,
-                          }}
-                        >
-                          {row.week || "-"}
-                        </div>
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "0.75rem",
-                          fontWeight: 600,
-                          color: payrollStyle.color,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.payrollPct.toFixed(1)}%
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "0.75rem",
-                          fontWeight: 600,
-                          color: foodStyle.color,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.foodPct.toFixed(1)}%
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "0.75rem",
-                          fontWeight: 600,
-                          color: drinkStyle.color,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.drinkPct.toFixed(1)}%
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "0.75rem",
-                          fontWeight: 600,
-                          color: salesStyle.color,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {row.salesVar >= 0 ? "+" : ""}
-                        £{Math.round(row.salesVar).toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div
-            style={{
-              fontSize: "0.7rem",
-              color: "#6b7280",
-              lineHeight: 1.4,
-              marginTop: "0.75rem",
-            }}
-          >
-            Worst payroll % shown first. Green = on target, Red = off target.
-          </div>
-        </div>
-    </div>
-  );
-}
-
-/* ----------------
-   KPI Cards block
------------------*/
-
-function KPIBlock({ data, payrollTarget, foodTarget, drinkTarget }) {
-  if (!data || data.length === 0) return null;
-
-  const total = (key) =>
-    data.reduce((sum, row) => sum + (row[key] || 0), 0);
-
-  const totalSales = total("Sales_Actual");
-  const salesVsBudget = total("Sales_Actual") - total("Sales_Budget");
-
-  const payrollPct = totalSales
-    ? (total("Payroll_Actual") / totalSales) * 100
-    : 0;
-  const foodPct = totalSales
-    ? (total("Food_Actual") / totalSales) * 100
-    : 0;
-  const drinkPct = totalSales
-    ? (total("Drink_Actual") / totalSales) * 100
-    : 0;
-
-  const kpis = [
-    {
-      label: "Total Sales",
-      value: formatCurrency(totalSales),
-      positive: true,
-    },
-    {
-      label: "Sales vs Budget",
-      value: formatCurrency(salesVsBudget),
-      positive: salesVsBudget >= 0,
-    },
-    {
-      label: "Payroll %",
-      value: `${payrollPct.toFixed(1)}%`,
-      positive: payrollPct <= payrollTarget,
-    },
-    {
-      label: "Food Cost %",
-      value: `${foodPct.toFixed(1)}%`,
-      positive: foodPct <= foodTarget,
-    },
-    {
-      label: "Drink Cost %",
-      value: `${drinkPct.toFixed(1)}%`,
-      positive: drinkPct <= drinkTarget,
-    },
-  ];
-
-  return (
-    <div
-      style={{
-        maxWidth: "1400px",
-        marginLeft: "auto",
-        marginRight: "auto",
-        padding: "0 1rem",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "1rem",
-        justifyContent: "center",
-      }}
-    >
-      {kpis.map((kpi, idx) => (
-        <div
-          key={idx}
-          style={{
-            flex: "1 1 200px",
-            maxWidth: "240px",
-            minWidth: "200px",
-            backgroundColor: "#fff",
-            borderRadius: "0.75rem",
-            boxShadow:
-              "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-            border: "1px solid rgba(0,0,0,0.05)",
-            padding: "1rem",
-            textAlign: "center",
-            fontFamily: "Inter, system-ui, sans-serif",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 500,
-              color: "#4b5563",
-              marginBottom: "0.5rem",
-              lineHeight: 1.3,
-            }}
-          >
-            {kpi.label}
-          </div>
-          <div
-            style={{
-              fontSize: "1.25rem",
-              fontWeight: 600,
-              color: kpi.positive ? "#059669" : "#dc2626",
-              lineHeight: 1.2,
-            }}
-          >
-            {kpi.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* -----------------
-   Chart + Export
-------------------*/
-
-function ChartSection({
-  activeTab,
-  filteredData,
-  chartConfig,
-  yTickFormatter,
-  tooltipFormatter,
-}) {
-  const lines = chartConfig[activeTab] || [];
-
-  return (
-    <div
-      style={{
-        maxWidth: "1400px",
-        marginLeft: "auto",
-        marginRight: "auto",
-        backgroundColor: "#fff",
-        borderRadius: "0.75rem",
-        boxShadow:
-          "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-        border: "1px solid rgba(0,0,0,0.05)",
-        padding: "1rem 1rem 1.5rem",
-        marginBottom: "2rem",
-        fontFamily: "Inter, system-ui, sans-serif",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "1rem",
-          rowGap: "0.75rem",
-        }}
-      >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "1rem",
-            fontWeight: 600,
-            color: "#111827",
-            lineHeight: 1.3,
-          }}
-        >
-          {activeTab}: Actual vs Budget
-        </h2>
-
-        <CSVLink
-          data={filteredData}
-          filename={`${activeTab}.csv`}
-          style={{
-            fontSize: "0.8rem",
-            backgroundColor: "#111827",
-            color: "#fff",
-            padding: "0.5rem 0.75rem",
-            borderRadius: "0.5rem",
-            textDecoration: "none",
-            fontWeight: 500,
-            lineHeight: 1.2,
-            boxShadow: "0 12px 24px rgba(0,0,0,0.4)",
-          }}
-        >
-          Export CSV
-        </CSVLink>
-      </div>
-
-      <div style={{ width: "100%", height: "300px" }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={filteredData}>
-            <XAxis dataKey="Week" />
-            <YAxis tickFormatter={yTickFormatter} />
-            <Tooltip formatter={tooltipFormatter} />
-            <Legend />
-            {lines.map((line) => (
-              <Line
-                key={line.key}
-                type="monotone"
-                dataKey={line.key}
-                stroke={line.color}
-                name={line.name}
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6, strokeWidth: 2, stroke: "#000" }}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
-export default App;
+const mutedText = {
+  color: "#6b7280",
+  fontSize: "0.9rem",
+  lineHeight: 1.4,
+  fontWeight: 500,
+};
