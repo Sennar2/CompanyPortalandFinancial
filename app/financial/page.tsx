@@ -13,12 +13,12 @@ import {
 import { CSVLink } from "react-csv";
 import { supabase } from "@/lib/supabaseClient"; // <- same supabase client you use everywhere
 
-import InsightsBar from "@/components/financial/InsightsBar";
-import ComplianceBar from "@/components/financial/ComplianceBar";
-import RankingTable from "@/components/financial/RankingTable";
-import KPIBlock from "@/components/financial/KPIBlock";
-import ChartSection from "@/components/financial/ChartSection";
-import FinancialFooter from "@/components/financial/FinancialFooter";
+import InsightsBar from "../../scr/components/financial/InsightsBar";
+import ComplianceBar from "../../scr/components/financial/ComplianceBar";
+import RankingTable from "../../scr/components/financial/RankingTable";
+import KPIBlock from "../../scr/components/financial/KPIBlock";
+import ChartSection from "../../scr/components/financial/ChartSection";
+import FinancialFooter from "../../scr/components/financial/FinancialFooter";
 
 // ─────────────────────────────
 // CONSTANTS / CONFIG
