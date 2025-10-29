@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../src/lib/supabaseClient';
 
 // ─────────────────────────────
-// constants / config
+// config / constants
 // ─────────────────────────────
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
@@ -49,7 +49,7 @@ const FOOD_TARGET = 12.5; // %
 const DRINK_TARGET = 5.5; // %
 
 // ─────────────────────────────
-// helper functions
+// helpers
 // ─────────────────────────────
 function parseWeekNum(weekStr: string | undefined) {
   const num = parseInt(String(weekStr || '').replace(/[^\d]/g, ''), 10);
@@ -68,11 +68,12 @@ function getISOWeek(date = new Date()) {
   );
   return weekNo > 52 ? 52 : weekNo;
 }
+
 function getCurrentWeekLabel() {
   return `W${getISOWeek(new Date())}`;
 }
 
-// google sheets -> array of row objects
+// take raw sheet values -> array of row objects
 function parseSheetValues(values: any[][] | undefined) {
   if (!values || values.length < 2) return [];
   const [headers, ...rows] = values;
@@ -108,7 +109,7 @@ async function fetchTab(tabName: string) {
   return parseSheetValues(json.values);
 }
 
-// roll up multiple tabs (brand group) by Week
+// merge multiple site tabs (brand rollup) by Week
 function rollupByWeek(rowsArray: any[]) {
   if (!rowsArray.length) return [];
   const grouped: Record<string, any[]> = {};
@@ -141,7 +142,7 @@ function rollupByWeek(rowsArray: any[]) {
   return merged;
 }
 
-// builds insights snapshot for "last completed week"
+// compute "insights" for the last completed week
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
 
@@ -185,6 +186,7 @@ function computeInsightsBundle(rows: any[]) {
   const weekNumWeUse = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${weekNumWeUse}`;
 
+  // (not currently rendered, but still part of snapshot)
   const windowWeeks = [
     weekNumWeUse,
     weekNumWeUse - 1,
@@ -203,7 +205,6 @@ function computeInsightsBundle(rows: any[]) {
   const payrollTrendVals = last4Rows.map((row) =>
     parsePayrollVar(row['Payroll_v%'])
   );
-
   const avgPayrollVar4w =
     payrollTrendVals.length > 0
       ? payrollTrendVals.reduce((sum, n) => sum + n, 0) /
@@ -222,25 +223,35 @@ function computeInsightsBundle(rows: any[]) {
       ? (latestRow.Payroll_Actual / salesActual) * 100
       : 0;
 
+  const foodPct =
+    salesActual !== 0
+      ? (latestRow.Food_Actual / salesActual) * 100
+      : 0;
+
+  const drinkPct =
+    salesActual !== 0
+      ? (latestRow.Drink_Actual / salesActual) * 100
+      : 0;
+
+  const salesVsLastYearPct =
+    salesLastYear !== 0
+      ? ((salesActual - salesLastYear) / salesLastYear) * 100
+      : 0;
+
   return {
-    wkLabel, // e.g. "W43"
+    wkLabel,
     salesActual,
     salesBudget,
     salesVar,
     salesVarPct,
     payrollPct,
+    foodPct,
+    drinkPct,
+    salesVsLastYearPct,
     avgPayrollVar4w,
   };
 }
 
-// percent helper
-function formatPct(n: number | undefined | null) {
-  if (n === undefined || n === null || isNaN(n)) return '0.0%';
-  const v = Number(n);
-  return `${v.toFixed(1)}%`;
-}
-
-// currency helper
 function formatCurrency(val: number | undefined | null) {
   if (val === undefined || val === null || isNaN(val)) return '£0';
   return (
@@ -252,9 +263,7 @@ function formatCurrency(val: number | undefined | null) {
   );
 }
 
-// ─────────────────────────────
-// tiny UI helpers
-// ─────────────────────────────
+// tiny ✓ / ✗ helper
 function TargetStatus({ isGood }: { isGood: boolean }) {
   return (
     <span
@@ -268,7 +277,7 @@ function TargetStatus({ isGood }: { isGood: boolean }) {
   );
 }
 
-// Insights hero cards row (Current Week + Last Week Results)
+// hero row (Current Week + Last Week Results)
 function InsightsHero({
   currentWeekNow,
   insights,
@@ -281,8 +290,8 @@ function InsightsHero({
   if (!insights) return null;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* Current Week */}
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Current Week card */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="text-xs text-gray-500 font-medium mb-4">
           Current Week
@@ -295,7 +304,7 @@ function InsightsHero({
         </p>
       </div>
 
-      {/* Last Week Results */}
+      {/* Last Week Results card */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col justify-between">
         <div className="flex items-start justify-between">
           <div className="text-xs text-gray-500 font-medium">
@@ -338,7 +347,7 @@ function InsightsHero({
   );
 }
 
-// KPI metric cards row under hero
+// small KPI cards row
 function MetricCard({
   label,
   weekLabel,
@@ -417,7 +426,9 @@ function RankingTable({
             <th className="text-left font-medium px-4 py-2">
               Drink % (≤ {drinkTarget}%)
             </th>
-            <th className="text-left font-medium px-4 py-2">Sales vs Budget</th>
+            <th className="text-left font-medium px-4 py-2">
+              Sales vs Budget
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -482,6 +493,12 @@ function RankingTable({
   );
 }
 
+// charts (line / whatever) — you already have this component in repo
+// we’ll just import and render it.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ChartSection = require('../../src/components/financial/ChartSection')
+  .default as ({ data, period }: { data: any[]; period: string }) => JSX.Element;
+
 // ─────────────────────────────
 // PAGE COMPONENT
 // ─────────────────────────────
@@ -491,21 +508,23 @@ export default function FinancialPage() {
   const [profile, setProfile] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // dashboard state
+  // filters
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
   const [initialLocation, setInitialLocation] = useState('');
   const [location, setLocation] = useState('');
   const [period, setPeriod] = useState('Week');
 
+  // sheet data
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState('');
 
+  // ranking
   const [rankingData, setRankingData] = useState<any[]>([]);
 
   const currentWeekNow = getCurrentWeekLabel();
 
-  // auth init
+  // session listener
   useEffect(() => {
     let sub: any;
     async function init() {
@@ -527,7 +546,6 @@ export default function FinancialPage() {
       sub = listener;
     }
     init();
-
     return () => {
       if (sub) sub.subscription.unsubscribe();
     };
@@ -589,14 +607,14 @@ export default function FinancialPage() {
     await supabase.auth.signOut();
   }
 
-  // sync initialLocation -> location once available
+  // sync initial location
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // PRECOMPUTE WEEK → PERIOD / QUARTER MAP
+  // map each ISO week to Period / Quarter buckets for chart grouping
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return Array.from({ length: 52 }, (_, i) => {
       const w = i + 1;
@@ -619,7 +637,7 @@ export default function FinancialPage() {
     });
   }, []);
 
-  // inject Period / Quarter columns
+  // enrich rows with Period / Quarter columns
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || '').trim();
@@ -632,11 +650,10 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group rows for Period/Quarter view
+  // group rows into Period or Quarter totals for the chart
   function groupMergedRowsBy(bucketKey: 'Period' | 'Quarter') {
     if (!mergedRows.length) return [];
 
-    // build dictionary of label -> array<row>
     const grouped = mergedRows.reduce((acc, row) => {
       const key = (row as any)[bucketKey];
       if (!acc[key]) acc[key] = [];
@@ -649,22 +666,22 @@ export default function FinancialPage() {
     );
 
     return Object.entries(grouped).map(([label, rows]) => {
-      const rowArr = rows as any[]; // <- cast fixes TS "unknown"
+      const rowArr = rows as any[]; // <-- cast fixes TS 'unknown'
       const sums: Record<string, number> = {};
       numericKeys.forEach((col) => {
         sums[col] = rowArr.reduce(
-          (total, r) => total + ((r as any)[col] || 0),
+          (total, r: any) => total + (r[col] || 0),
           0
         );
       });
       return {
-        Week: label, // keep shape consistent-ish with "Week"
+        Week: label, // giving ChartSection a "Week-like" label to plot
         ...sums,
       };
     });
   }
 
-  // final data depending on period dropdown
+  // final data based on view dropdown
   const filteredData = useMemo(() => {
     if (!mergedRows.length) return [];
     if (period === 'Week') return mergedRows;
@@ -673,7 +690,7 @@ export default function FinancialPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRows, period]);
 
-  // load sheet data for selected location
+  // load rows for selected location/brand
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -706,13 +723,13 @@ export default function FinancialPage() {
     load();
   }, [location]);
 
-  // compute hero insight snapshot
+  // compute snapshot insights
   const insights = useMemo(
     () => computeInsightsBundle(mergedRows),
     [mergedRows]
   );
 
-  // build ranking data
+  // build site ranking table (payroll%, etc)
   useEffect(() => {
     async function buildRanking() {
       const roleLower = (profile?.role || '').toLowerCase();
@@ -731,11 +748,12 @@ export default function FinancialPage() {
               (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
             );
 
-            // similar "last completed week" logic
+            // same "last completed week" logic
             const decorated = sorted.map((r: any) => ({
               ...r,
               __weekNum: parseWeekNum(r.Week),
             }));
+
             function rowHasData(r: any) {
               return (
                 (r.Sales_Actual && r.Sales_Actual !== 0) ||
@@ -743,6 +761,7 @@ export default function FinancialPage() {
                 (r.Sales_Budget && r.Sales_Budget !== 0)
               );
             }
+
             const nowWeek = getISOWeek(new Date());
             const snapWeek = nowWeek - 1 <= 0 ? nowWeek : nowWeek - 1;
 
@@ -808,7 +827,7 @@ export default function FinancialPage() {
   }, [profile]);
 
   // ─────────────────────────────
-  // RENDER GUARDS
+  // guards
   // ─────────────────────────────
   if (authLoading) {
     return (
@@ -849,114 +868,67 @@ export default function FinancialPage() {
   }
 
   // ─────────────────────────────
-  // MAIN PAGE
+  // PAGE LAYOUT
+  // IMPORTANT:
+  //  - We DO NOT render the portal header again.
+  //    The global layout already shows it, so no more double bar.
+  //
+  //  - We DO render the "Financial Performance / filters" block here.
   // ─────────────────────────────
   return (
     <main className="bg-gray-50 min-h-screen text-gray-900 font-[system-ui]">
-      {/* TOP STRIP - matches portal header */}
-      <header className="w-full border-b bg-white/90 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-start sm:justify-between px-4 py-3">
-          {/* left side: logo + brand */}
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0">
-              <img
-                src="/logo.png"
-                alt="La Mia Mamma"
-                className="w-10 h-10 object-contain rounded-sm"
-              />
+      {/* FINANCIAL PERFORMANCE + FILTERS */}
+      <section className="border-b border-gray-200 bg-white">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* title + subtitle */}
+          <div className="text-center mb-6">
+            <div className="text-base font-semibold text-gray-900">
+              Financial Performance
             </div>
-            <div className="leading-tight">
-              <div className="text-sm font-semibold text-gray-900">
-                La Mia Mamma Portal
-              </div>
-              <div className="text-[11px] text-gray-500 -mt-0.5">
-                Staff Access
-              </div>
+            <div className="text-xs text-gray-500">
+              Select your location and view
             </div>
           </div>
 
-          {/* right side: admin pill + name + logout */}
-          <div className="flex items-center gap-3 mt-3 sm:mt-0 text-sm">
-            {profile.role?.toLowerCase() === 'admin' && (
-              <a
-                href="/admin"
-                className="inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition"
+          {/* filters row */}
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-center gap-6">
+            {/* Location */}
+            <div className="flex flex-col text-left">
+              <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
+                Location
+              </label>
+              <select
+                className="w-64 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
               >
-                Admin Panel
-              </a>
-            )}
-
-            <div className="text-right leading-tight hidden sm:block">
-              <div className="text-gray-900 font-medium text-[13px] truncate max-w-[140px]">
-                {profile.full_name || 'User'}
-              </div>
-              <div className="text-[11px] text-gray-500 uppercase tracking-wide">
-                {profile.role}
-              </div>
+                {allowedLocations.map((loc) => (
+                  <option key={loc}>{loc}</option>
+                ))}
+              </select>
             </div>
 
-            <button
-              onClick={handleSignOut}
-              className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
-            >
-              Log out
-            </button>
-          </div>
-        </div>
-
-        {/* FINANCIAL PERFORMANCE HEADER BLOCK */}
-        <div className="border-t border-gray-200 bg-white">
-          <div className="max-w-7xl mx-auto px-4 py-6">
-            {/* centered headline */}
-            <div className="text-center mb-6">
-              <div className="text-base font-semibold text-gray-900">
-                Financial Performance
-              </div>
-              <div className="text-xs text-gray-500">
-                Select your location and view
-              </div>
-            </div>
-
-            {/* filters row */}
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-center gap-6">
-              {/* Location */}
-              <div className="flex flex-col text-left">
-                <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
-                  Location
-                </label>
-                <select
-                  className="w-60 appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                >
-                  {allowedLocations.map((loc) => (
-                    <option key={loc}>{loc}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Period */}
-              <div className="flex flex-col text-left">
-                <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
-                  View
-                </label>
-                <select
-                  className="w-40 appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value)}
-                >
-                  {PERIODS.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
+            {/* Period */}
+            <div className="flex flex-col text-left">
+              <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
+                View
+              </label>
+              <select
+                className="w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+              >
+                {PERIODS.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
-      </header>
+      </section>
 
       {/* BODY CONTENT */}
-      <section className="max-w-7xl mx-auto px-4 py-8 space-y-10">
+      <section className="max-w-7xl mx-auto px-4 py-8 space-y-12">
         {/* HERO INSIGHTS */}
         <InsightsHero
           currentWeekNow={currentWeekNow}
@@ -964,8 +936,8 @@ export default function FinancialPage() {
           payrollTarget={PAYROLL_TARGET}
         />
 
-        {/* KPI cards row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-16">
+        {/* KPI row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* Payroll % */}
           <MetricCard
             label="Payroll %"
@@ -975,28 +947,30 @@ export default function FinancialPage() {
             good={(insights?.payrollPct || 0) <= PAYROLL_TARGET}
           />
 
-          {/* Food % placeholder */}
+          {/* Food % */}
           <MetricCard
             label="Food %"
             weekLabel={insights?.wkLabel || '–'}
             targetText={`Target ≤ ${FOOD_TARGET}%`}
-            valuePct={0}
-            good={0 <= FOOD_TARGET}
+            valuePct={insights?.foodPct || 0}
+            good={(insights?.foodPct || 0) <= FOOD_TARGET}
           />
 
-          {/* Drink % placeholder */}
+          {/* Drink % */}
           <MetricCard
             label="Drink %"
             weekLabel={insights?.wkLabel || '–'}
             targetText={`Target ≤ ${DRINK_TARGET}%`}
-            valuePct={0}
-            good={0 <= DRINK_TARGET}
+            valuePct={insights?.drinkPct || 0}
+            good={(insights?.drinkPct || 0) <= DRINK_TARGET}
           />
 
-          {/* Sales vs LY placeholder */}
+          {/* Sales vs LY */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col">
             <div className="text-xs text-gray-500 font-medium flex flex-wrap items-center gap-1">
-              <span className="text-gray-900 font-semibold">Sales vs LY</span>
+              <span className="text-gray-900 font-semibold">
+                Sales vs LY
+              </span>
               <span className="flex items-center gap-1 text-gray-500">
                 <span className="text-xs text-gray-400">●</span>
                 <span className="text-xs text-gray-600 font-semibold">
@@ -1009,15 +983,25 @@ export default function FinancialPage() {
             </div>
 
             <div className="text-green-600 text-xl font-semibold mt-2 flex items-center">
-              0.0% <TargetStatus isGood={true} />
+              {(insights?.salesVsLastYearPct ?? 0).toFixed(1)}%
+              <TargetStatus
+                isGood={(insights?.salesVsLastYearPct ?? 0) >= 0}
+              />
             </div>
           </div>
+        </div>
+
+        {/* CHARTS SECTION (line/area trends etc.) */}
+        <div className="mt-4">
+          <ChartSection data={filteredData} period={period} />
         </div>
 
         {/* RANKING TABLE */}
         <div className="mt-8">
           {loadingData && (
-            <p className="text-center text-gray-500 text-sm">Loading data…</p>
+            <p className="text-center text-gray-500 text-sm">
+              Loading data…
+            </p>
           )}
 
           {!loadingData && fetchError && (
@@ -1034,6 +1018,19 @@ export default function FinancialPage() {
               drinkTarget={DRINK_TARGET}
             />
           )}
+        </div>
+
+        {/* sign out at bottom (just in case, esp. mobile) */}
+        <div className="text-center pt-10 pb-16">
+          <button
+            onClick={handleSignOut}
+            className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-4 py-2 hover:bg-black transition"
+          >
+            Log out
+          </button>
+          <div className="text-[11px] text-gray-400 mt-2 uppercase tracking-wide">
+            {profile.full_name} • {profile.role}
+          </div>
         </div>
       </section>
     </main>
