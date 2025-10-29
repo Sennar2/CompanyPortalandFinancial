@@ -4,21 +4,33 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../lib/supabaseClient";
+
+// Match the portal header role model
+type UserRole = "user" | "ops" | "admin" | "manager" | "operation";
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  role: UserRole | string;
+  home_location: string | null;
+};
 
 export default function FinancialHeader() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [profileLoaded, setProfileLoaded] = useState(false);
-  const [profile, setProfile] = useState(null);
+  // local header state
+  const [profileLoaded, setProfileLoaded] = useState<boolean>(false);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
 
-  // This mirrors the portal header logic
+  // pull minimal auth info for header (like the portal header does)
   useEffect(() => {
     (async () => {
       try {
         const { data: authData } = await supabase.auth.getUser();
         const user = authData?.user;
+
         if (!user) {
           setProfileLoaded(true);
           setProfile(null);
@@ -31,14 +43,15 @@ export default function FinancialHeader() {
           .eq("id", user.id)
           .limit(1);
 
-        // fallback profile if not found
-        const prof =
-          profRows?.[0] ?? {
+        // if not found in `profiles`, fallback to auth user info
+        const prof: ProfileRow =
+          (profRows?.[0] as ProfileRow) ??
+          ({
             id: user.id,
-            full_name: user.email ?? null,
+            full_name: (user as any).email ?? null,
             role: "user",
             home_location: null,
-          };
+          } as ProfileRow);
 
         setProfile(prof);
       } catch {
@@ -54,13 +67,10 @@ export default function FinancialHeader() {
     router.push("/login");
   }
 
-  const showAdminPill =
-    profile?.role === "admin" && pathname !== "/admin";
-
   return (
     <header className="w-full border-b bg-white/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3 md:py-4">
-        {/* LEFT: Logo + portal name */}
+        {/* LEFT: Logo + text */}
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
             <Image
@@ -75,27 +85,27 @@ export default function FinancialHeader() {
                 La Mia Mamma Portal
               </span>
               <span className="text-[11px] text-gray-500 -mt-0.5">
-                Staff Access
+                Financial Performance
               </span>
             </div>
           </Link>
         </div>
 
-        {/* RIGHT: Admin Panel pill / user block / logout */}
+        {/* RIGHT: profile / admin link / logout */}
         <div className="flex items-center gap-3 text-sm">
           {profileLoaded && profile ? (
             <>
-              {/* Admin Panel pill (only if admin and not on /admin) */}
-              {showAdminPill && (
-                <Link
-                  href="/admin"
-                  className="hidden sm:inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition"
-                >
-                  Admin Panel
-                </Link>
-              )}
+              {/* Admin Panel pill (only if admin and not already on /admin) */}
+              {String(profile.role).toLowerCase() === "admin" &&
+                pathname !== "/admin" && (
+                  <Link
+                    href="/admin"
+                    className="hidden sm:inline-block rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 hover:bg-indigo-100 transition"
+                  >
+                    Admin Panel
+                  </Link>
+                )}
 
-              {/* Name + role */}
               <div className="text-right leading-tight hidden sm:block">
                 <div className="text-gray-900 font-medium text-[13px] truncate max-w-[140px]">
                   {profile.full_name || "User"}
@@ -105,7 +115,6 @@ export default function FinancialHeader() {
                 </div>
               </div>
 
-              {/* Logout button */}
               <button
                 onClick={handleLogout}
                 className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
@@ -122,7 +131,7 @@ export default function FinancialHeader() {
               Sign in
             </Link>
           ) : (
-            // loading shimmer
+            // still loading
             <div className="h-[30px] w-[80px] bg-gray-200 rounded animate-pulse" />
           )}
         </div>
