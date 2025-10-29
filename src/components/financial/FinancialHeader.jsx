@@ -1,6 +1,8 @@
+// src/components/financial/FinancialHeader.jsx
 "use client";
 
 import React from "react";
+import Link from "next/link";
 
 export default function FinancialHeader({
   profile,
@@ -12,200 +14,174 @@ export default function FinancialHeader({
   setPeriod,
   PERIODS,
 }) {
-  const name = profile?.full_name || "User";
-  const roleRaw = profile?.role || "";
-  const rolePretty =
-    roleRaw.charAt(0).toUpperCase() +
-    roleRaw.slice(1).toLowerCase();
-
   return (
     <header
       style={{
-        width: "100%",
+        position: "relative",
+        padding: "1.5rem 1rem 2rem",
+        maxWidth: "1200px",
+        margin: "0 auto",
         fontFamily: "Inter, system-ui, sans-serif",
         color: "#111827",
-        backgroundColor: "#fff",
       }}
     >
-      {/* Top bar */}
+      {/* top-right user card */}
       <div
         style={{
-          borderBottom: "1px solid #e5e7eb",
+          position: "absolute",
+          top: 0,
+          right: 0,
+          background:
+            "linear-gradient(to right, rgb(31,41,55), rgb(55,65,81))",
+          color: "#fff",
+          borderRadius: "0.75rem",
+          boxShadow:
+            "0 24px 40px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.4)",
           padding: "0.75rem 1rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          rowGap: "0.75rem",
-          maxWidth: "1400px",
-          margin: "0 auto",
+          minWidth: "190px",
+          fontSize: "0.8rem",
+          lineHeight: 1.3,
         }}
       >
-        {/* Logo + portal label */}
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            minWidth: 0,
-            gap: "0.75rem",
+            fontWeight: 600,
+            fontSize: "0.8rem",
+            color: "#fff",
           }}
         >
-          <img
-            src="/logo.png"
-            alt="Company Logo"
-            style={{
-              height: "32px",
-              width: "auto",
-              objectFit: "contain",
-            }}
-          />
-          <div style={{ lineHeight: 1.3 }}>
-            <div
-              style={{
-                fontSize: "0.9rem",
-                fontWeight: 600,
-                color: "#111827",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Company Portal
-            </div>
-            <div
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 400,
-                color: "#6b7280",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Financial Performance
-            </div>
-          </div>
+          {profile?.full_name || "User"}
         </div>
-
-        {/* User + Sign out */}
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "0.75rem 1rem",
+            fontSize: "0.7rem",
+            color: "#d1d5db",
+            marginTop: "0.15rem",
+            textTransform: "capitalize",
+          }}
+        >
+          {profile?.role || "—"}
+        </div>
+
+        <button
+          onClick={onSignOut}
+          style={{
+            marginTop: "0.5rem",
+            backgroundColor: "#2563eb",
+            borderRadius: "0.5rem",
+            padding: "0.4rem 0.6rem",
+            width: "100%",
+            textAlign: "center",
+            fontSize: "0.7rem",
+            fontWeight: 600,
+            color: "#fff",
+            border: "none",
+            cursor: "pointer",
+            boxShadow:
+              "0 12px 24px rgba(37,99,235,0.5), 0 4px 12px rgba(0,0,0,0.4)",
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+
+      {/* centered block with logo + copy + controls below */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "0.5rem",
+          textAlign: "center",
+        }}
+      >
+        {/* clickable logo / title back to portal home */}
+        <Link
+          href="/"
+          style={{
+            textDecoration: "none",
+            color: "inherit",
           }}
         >
           <div
             style={{
-              lineHeight: 1.3,
-              textAlign: "right",
-              minWidth: "120px",
+              cursor: "pointer",
             }}
           >
+            <img
+              src="/logo.png"
+              alt="La Mia Mamma"
+              style={{
+                height: "3.5rem",
+                width: "auto",
+                objectFit: "contain",
+                display: "block",
+                marginLeft: "auto",
+                marginRight: "auto",
+              }}
+            />
             <div
               style={{
-                fontSize: "0.8rem",
+                fontSize: "0.9rem",
                 fontWeight: 600,
                 color: "#111827",
+                lineHeight: 1.3,
+                marginTop: "0.25rem",
               }}
             >
-              {name}
+              La Mia Mamma Portal
             </div>
             <div
               style={{
                 fontSize: "0.7rem",
-                fontWeight: 400,
                 color: "#6b7280",
-                textTransform: "capitalize",
+                lineHeight: 1.2,
               }}
             >
-              {rolePretty}
+              Staff Access
             </div>
           </div>
+        </Link>
 
-          <button
-            onClick={onSignOut}
-            style={{
-              appearance: "none",
-              border: 0,
-              outline: 0,
-              cursor: "pointer",
-              backgroundColor: "#1d4ed8",
-              backgroundImage:
-                "linear-gradient(to bottom right,#2563eb,#1d4ed8)",
-              color: "#fff",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              lineHeight: 1.2,
-              borderRadius: "0.5rem",
-              padding: "0.55rem 0.9rem",
-              boxShadow: "0 12px 24px rgba(29,78,216,0.35)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
-
-      {/* Title + filters */}
-      <div
-        style={{
-          maxWidth: "1400px",
-          margin: "1rem auto 1.5rem",
-          padding: "0 1rem",
-          textAlign: "center",
-        }}
-      >
-        <h1
-          style={{
-            margin: 0,
-            color: "#1f2937",
-            fontSize: "1.75rem",
-            fontWeight: 500,
-            lineHeight: 1.2,
-          }}
-        >
-          Performance 2025
-        </h1>
-
+        {/* selectors row under the logo */}
         <div
           style={{
-            marginTop: "1.25rem",
             display: "flex",
             flexWrap: "wrap",
-            rowGap: "1rem",
-            columnGap: "2rem",
-            alignItems: "flex-start",
             justifyContent: "center",
-            fontSize: "0.9rem",
-            lineHeight: 1.4,
-            color: "#111827",
+            gap: "1rem",
+            marginTop: "1rem",
           }}
         >
-          {/* Location / Brand dropdown */}
+          {/* Location dropdown */}
           <div style={{ textAlign: "left" }}>
             <label
               style={{
                 display: "block",
+                fontSize: "0.75rem",
                 fontWeight: 600,
-                fontSize: "0.9rem",
-                color: "#111827",
-                marginBottom: "0.4rem",
+                color: "#374151",
+                marginBottom: "0.25rem",
               }}
             >
-              Location / Brand:
+              Select Location / Brand
             </label>
             <select
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               style={{
-                minWidth: "220px",
-                padding: "0.6rem 0.75rem",
-                fontSize: "0.9rem",
-                borderRadius: "0.5rem",
-                border: "1px solid #d1d5db",
                 backgroundColor: "#fff",
+                border: "1px solid #d1d5db",
+                borderRadius: "0.5rem",
+                padding: "0.5rem 0.75rem",
+                minWidth: "220px",
+                fontSize: "0.8rem",
+                color: "#111827",
+                boxShadow:
+                  "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
               }}
             >
-              {allowedLocations.map((loc) => (
+              {allowedLocations?.map((loc) => (
                 <option key={loc} value={loc}>
                   {loc === "GroupOverview" ? "Group Overview" : loc}
                 </option>
@@ -218,27 +194,30 @@ export default function FinancialHeader({
             <label
               style={{
                 display: "block",
+                fontSize: "0.75rem",
                 fontWeight: 600,
-                fontSize: "0.9rem",
-                color: "#111827",
-                marginBottom: "0.4rem",
+                color: "#374151",
+                marginBottom: "0.25rem",
               }}
             >
-              Period:
+              Select Period
             </label>
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
               style={{
-                minWidth: "120px",
-                padding: "0.6rem 0.75rem",
-                fontSize: "0.9rem",
-                borderRadius: "0.5rem",
-                border: "1px solid #d1d5db",
                 backgroundColor: "#fff",
+                border: "1px solid #d1d5db",
+                borderRadius: "0.5rem",
+                padding: "0.5rem 0.75rem",
+                minWidth: "140px",
+                fontSize: "0.8rem",
+                color: "#111827",
+                boxShadow:
+                  "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
               }}
             >
-              {PERIODS.map((p) => (
+              {PERIODS?.map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
