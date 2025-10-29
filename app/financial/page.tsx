@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../src/lib/supabaseClient';
+import ChartSection from '../../src/components/financial/ChartSection';
 
 // ─────────────────────────────
 // config / constants
@@ -63,9 +64,9 @@ function getISOWeek(date = new Date()) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(
-    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
-  );
+  const raw = ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7;
+  const weekNo = Math.ceil(raw);
+  // clamp at 52 so late-December doesn't show W53 and break your mapping
   return weekNo > 52 ? 52 : weekNo;
 }
 
@@ -186,7 +187,7 @@ function computeInsightsBundle(rows: any[]) {
   const weekNumWeUse = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${weekNumWeUse}`;
 
-  // (not currently rendered, but still part of snapshot)
+  // we keep 4-week avg logic for possible future display
   const windowWeeks = [
     weekNumWeUse,
     weekNumWeUse - 1,
@@ -493,12 +494,6 @@ function RankingTable({
   );
 }
 
-// charts (line / whatever) — you already have this component in repo
-// we’ll just import and render it.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ChartSection = require('../../src/components/financial/ChartSection')
-  .default as ({ data, period }: { data: any[]; period: string }) => JSX.Element;
-
 // ─────────────────────────────
 // PAGE COMPONENT
 // ─────────────────────────────
@@ -614,7 +609,7 @@ export default function FinancialPage() {
     }
   }, [initialLocation, location]);
 
-  // map each ISO week to Period / Quarter buckets for chart grouping
+  // WEEK→PERIOD/QUARTER LUT
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return Array.from({ length: 52 }, (_, i) => {
       const w = i + 1;
@@ -637,7 +632,7 @@ export default function FinancialPage() {
     });
   }, []);
 
-  // enrich rows with Period / Quarter columns
+  // merge rows with Period / Quarter columns
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || '').trim();
@@ -650,7 +645,7 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group rows into Period or Quarter totals for the chart
+  // group rows for Period / Quarter view
   function groupMergedRowsBy(bucketKey: 'Period' | 'Quarter') {
     if (!mergedRows.length) return [];
 
@@ -666,7 +661,7 @@ export default function FinancialPage() {
     );
 
     return Object.entries(grouped).map(([label, rows]) => {
-      const rowArr = rows as any[]; // <-- cast fixes TS 'unknown'
+      const rowArr = rows as any[];
       const sums: Record<string, number> = {};
       numericKeys.forEach((col) => {
         sums[col] = rowArr.reduce(
@@ -675,13 +670,13 @@ export default function FinancialPage() {
         );
       });
       return {
-        Week: label, // giving ChartSection a "Week-like" label to plot
+        Week: label, // reusing "Week" key so ChartSection x-axis still prints nicely
         ...sums,
       };
     });
   }
 
-  // final data based on view dropdown
+  // final chart data
   const filteredData = useMemo(() => {
     if (!mergedRows.length) return [];
     if (period === 'Week') return mergedRows;
@@ -690,7 +685,7 @@ export default function FinancialPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRows, period]);
 
-  // load rows for selected location/brand
+  // load sheet rows for selected location/brand
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -729,7 +724,7 @@ export default function FinancialPage() {
     [mergedRows]
   );
 
-  // build site ranking table (payroll%, etc)
+  // ranking table build
   useEffect(() => {
     async function buildRanking() {
       const roleLower = (profile?.role || '').toLowerCase();
@@ -748,7 +743,6 @@ export default function FinancialPage() {
               (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
             );
 
-            // same "last completed week" logic
             const decorated = sorted.map((r: any) => ({
               ...r,
               __weekNum: parseWeekNum(r.Week),
@@ -827,7 +821,7 @@ export default function FinancialPage() {
   }, [profile]);
 
   // ─────────────────────────────
-  // guards
+  // guards / fallback UIs
   // ─────────────────────────────
   if (authLoading) {
     return (
@@ -868,16 +862,11 @@ export default function FinancialPage() {
   }
 
   // ─────────────────────────────
-  // PAGE LAYOUT
-  // IMPORTANT:
-  //  - We DO NOT render the portal header again.
-  //    The global layout already shows it, so no more double bar.
-  //
-  //  - We DO render the "Financial Performance / filters" block here.
+  // PAGE VIEW
   // ─────────────────────────────
   return (
     <main className="bg-gray-50 min-h-screen text-gray-900 font-[system-ui]">
-      {/* FINANCIAL PERFORMANCE + FILTERS */}
+      {/* FINANCIAL PERFORMANCE HEADER + FILTERS */}
       <section className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-4 py-6">
           {/* title + subtitle */}
@@ -908,7 +897,7 @@ export default function FinancialPage() {
               </select>
             </div>
 
-            {/* Period */}
+            {/* View / Period */}
             <div className="flex flex-col text-left">
               <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
                 View
@@ -931,7 +920,7 @@ export default function FinancialPage() {
       <section className="max-w-7xl mx-auto px-4 py-8 space-y-12">
         {/* HERO INSIGHTS */}
         <InsightsHero
-          currentWeekNow={currentWeekNow}
+          currentWeekNow={getCurrentWeekLabel()}
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
         />
@@ -991,7 +980,7 @@ export default function FinancialPage() {
           </div>
         </div>
 
-        {/* CHARTS SECTION (line/area trends etc.) */}
+        {/* CHARTS SECTION */}
         <div className="mt-4">
           <ChartSection data={filteredData} period={period} />
         </div>
@@ -1020,7 +1009,7 @@ export default function FinancialPage() {
           )}
         </div>
 
-        {/* sign out at bottom (just in case, esp. mobile) */}
+        {/* sign out at bottom (mobile safety net) */}
         <div className="text-center pt-10 pb-16">
           <button
             onClick={handleSignOut}
