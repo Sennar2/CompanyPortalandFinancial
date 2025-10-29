@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { supabase } from "../../src/lib/supabaseClient";
 import { CSVLink } from "react-csv";
+import { supabase } from "../../src/lib/supabaseClient";
 
+import InsightsBar from "../../src/components/financial/InsightsBar";
 import ComplianceBar from "../../src/components/financial/ComplianceBar";
 import RankingTable from "../../src/components/financial/RankingTable";
 import KPIBlock from "../../src/components/financial/KPIBlock";
@@ -181,9 +181,8 @@ function buildWeekToPeriodQuarter() {
 /**
  * computeInsightsBundle
  * Picks "last completed week" (currentWeek-1 with data),
- * and returns:
- * - last week's sales, payroll%, etc
- * - avgPayrollVar4w = avg of Payroll_v% last 4 weeks (can be + or -)
+ * and returns everything the dashboard cards need, plus
+ * avgPayrollVar4w.
  */
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
@@ -291,7 +290,7 @@ function computeInsightsBundle(rows: any[]) {
       : 0;
 
   return {
-    wkLabel,
+    wkLabel, // e.g. "W43" (last completed week)
     salesActual,
     salesBudget,
     salesVar,
@@ -301,7 +300,7 @@ function computeInsightsBundle(rows: any[]) {
     drinkPct,
     salesVsLastYearPct,
     avgPayrollVar4w,
-    currentWeekLabel: getCurrentWeekLabel(),
+    currentWeekLabel: getCurrentWeekLabel(), // e.g. "W44"
   };
 }
 
@@ -346,12 +345,12 @@ export default function FinancialPage() {
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
   const [initialLocation, setInitialLocation] = useState<string>("");
 
-  // UI
+  // UI state
   const [location, setLocation] = useState<string>("");
   const [period, setPeriod] = useState<string>("Week");
   const [activeTab, setActiveTab] = useState<string>("Sales");
 
-  // data
+  // data state
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState("");
@@ -429,21 +428,17 @@ export default function FinancialPage() {
     roleLower === "ops" ||
     roleLower === "manager";
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-  }
-
-  // pick first allowed location once we know it
+  // auto-set first location
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // build map Week->Period/Quarter once
+  // Week -> Period,Quarter map
   const WEEK_TO_PERIOD_QUARTER = useMemo(buildWeekToPeriodQuarter, []);
 
-  // decorate rows with Period + Quarter labels
+  // decorate rows with Period + Quarter
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || "").trim();
@@ -456,7 +451,7 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group data when Period/Quarter is selected
+  // groupMergedRowsBy for "Period" / "Quarter"
   function groupMergedRowsBy(bucketKey: "Period" | "Quarter") {
     if (!mergedRows.length) return [];
     const grouped: Record<string, any[]> = {};
@@ -489,13 +484,13 @@ export default function FinancialPage() {
     return groupMergedRowsBy("Quarter");
   }, [mergedRows, period]);
 
-  // compute insights from mergedRows
+  // insights = last completed week snapshot, avgPayrollVar4w etc
   const insights = useMemo(
     () => computeInsightsBundle(mergedRows),
     [mergedRows]
   );
 
-  // fetch rows for selected location / brand / group
+  // fetch rows for the current location
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -512,7 +507,7 @@ export default function FinancialPage() {
           );
           rows = rollupByWeek(allData.flat());
         } else {
-          // "GroupOverview" or an individual site
+          // "GroupOverview" or an individual store tab
           rows = await fetchTab(location);
           rows.sort(
             (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
@@ -536,7 +531,7 @@ export default function FinancialPage() {
     load();
   }, [location]);
 
-  // compute ranking table for admin/ops
+  // ranking for admin/ops
   useEffect(() => {
     async function buildRanking() {
       if (
@@ -603,7 +598,7 @@ export default function FinancialPage() {
     buildRanking();
   }, [roleLower]);
 
-  // chart formatting helpers
+  // chart config
   const chartConfig = {
     Sales: [
       { key: "Sales_Actual", color: "#4ade80", name: "Actual" },
@@ -643,24 +638,26 @@ export default function FinancialPage() {
 
   if (authLoading) {
     return (
-      <div style={centerWrap}>
-        <div style={mutedText}>Loading profile…</div>
+      <div className="min-h-screen flex items-center justify-center text-gray-500 font-medium text-sm">
+        Loading profile…
       </div>
     );
   }
 
   if (!session || !profile) {
     return (
-      <div style={centerWrap}>
-        <div style={denyBox}>You are not signed in.</div>
+      <div className="min-h-screen flex items-center justify-center font-sans">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-xl text-center text-red-600 font-medium text-sm px-4 py-3 max-w-xs">
+          You are not signed in.
+        </div>
       </div>
     );
   }
 
   if (!canViewFinance) {
     return (
-      <div style={centerWrap}>
-        <div style={denyBox}>
+      <div className="min-h-screen flex items-center justify-center font-sans">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-xl text-center text-red-600 font-medium text-sm px-4 py-3 max-w-xs">
           You don&apos;t have permission to view Financial Performance.
         </div>
       </div>
@@ -669,8 +666,8 @@ export default function FinancialPage() {
 
   if (!allowedLocations.length || !initialLocation) {
     return (
-      <div style={centerWrap}>
-        <div style={denyBox}>
+      <div className="min-h-screen flex items-center justify-center font-sans">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-xl text-center text-red-600 font-medium text-sm px-4 py-3 max-w-xs">
           No location access configured for this account.
         </div>
       </div>
@@ -679,292 +676,73 @@ export default function FinancialPage() {
 
   // ─────────────────────────
   // PAGE RENDER
+  // (HEADER from layout.tsx already, so DO NOT render another header here)
   // ─────────────────────────
+
   return (
-    <div
-      style={{
-        backgroundColor: "#f9fafb",
-        minHeight: "100vh",
-        fontFamily: "Inter, system-ui, sans-serif",
-        color: "#111827",
-      }}
-    >
-      {/* HEADER BAR (matches portal look, inline styles so no globals) */}
-      <header
-        style={{
-          width: "100%",
-          borderBottom: "1px solid #e5e7eb",
-          backgroundColor: "rgba(255,255,255,0.9)",
-          backdropFilter: "blur(4px)",
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "1280px",
-            margin: "0 auto",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0.75rem 1rem",
-          }}
-        >
-          {/* left: logo + portal link */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <Link
-              href="/"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                textDecoration: "none",
-              }}
-            >
-              <img
-                src="/logo.png"
-                alt="Company Logo"
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "4px",
-                  objectFit: "contain",
-                }}
-              />
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  lineHeight: 1.1,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "#111827",
-                  }}
-                >
-                  La Mia Mamma Portal
-                </span>
-                <span
-                  style={{
-                    fontSize: "0.7rem",
-                    color: "#6b7280",
-                    marginTop: "-2px",
-                  }}
-                >
-                  Staff Access
-                </span>
-              </div>
-            </Link>
-          </div>
-
-          {/* right: user / role / logout */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              fontSize: "0.8rem",
-            }}
-          >
-            <div
-              style={{
-                lineHeight: 1.2,
-                textAlign: "right",
-                maxWidth: "140px",
-              }}
-            >
-              <div
-                style={{
-                  color: "#111827",
-                  fontWeight: 500,
-                  fontSize: "0.8rem",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-                title={profile?.full_name || "User"}
-              >
-                {profile?.full_name || "User"}
-              </div>
-              <div
-                style={{
-                  color: "#6b7280",
-                  fontSize: "0.7rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {profile?.role}
-              </div>
-            </div>
-
-            <button
-              onClick={handleSignOut}
-              style={{
-                backgroundColor: "#111827",
-                color: "white",
-                fontWeight: 600,
-                fontSize: "0.7rem",
-                lineHeight: 1.2,
-                borderRadius: "0.375rem",
-                padding: "0.4rem 0.6rem",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 8px 16px rgba(0,0,0,0.25)",
-              }}
-            >
-              Log out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* CONTROLS ROW (location + period) */}
-      <section
-        style={{
-          maxWidth: "1280px",
-          margin: "1rem auto 0",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "1rem",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          padding: "0 1rem",
-        }}
-      >
-        {/* Title + current week */}
-        <div style={{ flex: "1 1 auto", minWidth: "200px" }}>
-          <div
-            style={{
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "#6b7280",
-              marginBottom: "0.25rem",
-              lineHeight: 1.2,
-            }}
-          >
+    <main className="bg-gray-50 min-h-screen font-sans text-gray-900 p-4 md:p-6 max-w-7xl mx-auto space-y-6">
+      {/* Top row: title + selects */}
+      <section className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        {/* Left: title */}
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-gray-500 leading-tight">
             Performance {new Date().getFullYear()}
           </div>
-          <h1
-            style={{
-              fontSize: "1.125rem",
-              lineHeight: 1.3,
-              fontWeight: 600,
-              color: "#111827",
-              margin: 0,
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "baseline",
-              gap: "0.5rem",
-            }}
-          >
+          <h1 className="text-lg font-semibold text-gray-900 leading-snug flex flex-wrap items-baseline gap-2">
             <span>Financial Dashboard</span>
-            <span
-              style={{
-                fontSize: "0.7rem",
-                color: "#6b7280",
-                fontWeight: 400,
-              }}
-            >
+            <span className="text-[11px] text-gray-500 font-normal">
               Current Week: {currentWeekNow}
             </span>
           </h1>
         </div>
 
-        {/* Location select */}
-        <div
-          style={{
-            flex: "0 0 auto",
-            minWidth: "200px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.25rem",
-          }}
-        >
-          <label
-            style={{
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "#374151",
-              lineHeight: 1.2,
-            }}
-          >
-            Select Location
-          </label>
+        {/* Right: selectors */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Location */}
+          <div className="flex flex-col text-sm">
+            <label className="text-[11px] font-semibold text-gray-700 mb-1 leading-none">
+              Select Location
+            </label>
+            <select
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              className="bg-white border border-gray-300 rounded-full text-sm text-gray-900 px-3 py-2 shadow-sm"
+            >
+              {allowedLocations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            style={{
-              backgroundColor: "#fff",
-              border: "1px solid #d1d5db",
-              borderRadius: "9999px",
-              fontSize: "0.8rem",
-              lineHeight: 1.2,
-              color: "#111827",
-              padding: "0.5rem 0.75rem",
-              boxShadow:
-                "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
-            }}
-          >
-            {allowedLocations.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Period select */}
-        <div
-          style={{
-            flex: "0 0 auto",
-            minWidth: "160px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.25rem",
-          }}
-        >
-          <label
-            style={{
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "#374151",
-              lineHeight: 1.2,
-            }}
-          >
-            Select Period
-          </label>
-
-          <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            style={{
-              backgroundColor: "#fff",
-              border: "1px solid #d1d5db",
-              borderRadius: "9999px",
-              fontSize: "0.8rem",
-              lineHeight: 1.2,
-              color: "#111827",
-              padding: "0.5rem 0.75rem",
-              boxShadow:
-                "0 8px 16px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
-            }}
-          >
-            {PERIODS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+          {/* Period */}
+          <div className="flex flex-col text-sm">
+            <label className="text-[11px] font-semibold text-gray-700 mb-1 leading-none">
+              Select Period
+            </label>
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="bg-white border border-gray-300 rounded-full text-sm text-gray-900 px-3 py-2 shadow-sm"
+            >
+              {PERIODS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </section>
 
-      {/* 🔥 ONLY ONE BAR NOW: ComplianceBar does the “last week snapshot + dot” */}
+      {/* Row 1: Two big cards (Current Week / Last Week Results) */}
+      <InsightsBar
+        insights={insights}
+        payrollTarget={PAYROLL_TARGET}
+      />
+
+      {/* Row 2: Compliance KPIs (Payroll%, Food%, Drink%, Sales vs LY) */}
       <ComplianceBar
         insights={insights}
         payrollTarget={PAYROLL_TARGET}
@@ -972,7 +750,7 @@ export default function FinancialPage() {
         drinkTarget={DRINK_TARGET}
       />
 
-      {/* Ranking (admin / ops only) */}
+      {/* Ranking table (admin / ops only) */}
       {(roleLower === "admin" ||
         roleLower === "operation" ||
         roleLower === "ops") &&
@@ -985,7 +763,7 @@ export default function FinancialPage() {
           />
         )}
 
-      {/* KPI row */}
+      {/* KPI block for totals */}
       {!loadingData && !fetchError && (
         <KPIBlock
           data={filteredData}
@@ -995,44 +773,24 @@ export default function FinancialPage() {
         />
       )}
 
-      {/* Tab buttons for chart */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          flexWrap: "wrap",
-          marginTop: "1.5rem",
-          marginBottom: "1rem",
-          gap: "0.5rem",
-        }}
-      >
+      {/* Tab buttons */}
+      <div className="flex flex-wrap justify-center gap-2 mt-6 mb-4">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            style={{
-              backgroundColor:
-                activeTab === tab ? "#111827" : "#fff",
-              color: activeTab === tab ? "#fff" : "#111827",
-              border: "1px solid #d1d5db",
-              borderRadius: "0.5rem",
-              padding: "0.5rem 0.75rem",
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              lineHeight: 1.2,
-              cursor: "pointer",
-              boxShadow:
-                activeTab === tab
-                  ? "0 12px 24px rgba(0,0,0,0.4)"
-                  : "0 8px 16px rgba(0,0,0,0.05)",
-            }}
+            className={`text-sm font-medium border rounded-lg px-3 py-2 shadow-sm ${
+              activeTab === tab
+                ? "bg-gray-900 text-white shadow-2xl"
+                : "bg-white text-gray-900 border-gray-300 shadow"
+            }`}
           >
             {tab}
           </button>
         ))}
       </div>
 
-      {/* Chart */}
+      {/* Chart section */}
       {!loadingData && !fetchError && (
         <ChartSection
           activeTab={activeTab}
@@ -1044,62 +802,20 @@ export default function FinancialPage() {
         />
       )}
 
-      {/* Feedback when loading or error */}
+      {/* Status / errors */}
       {loadingData && (
-        <p
-          style={{
-            textAlign: "center",
-            marginTop: "1rem",
-            color: "#6b7280",
-          }}
-        >
+        <p className="text-center text-sm text-gray-500 mt-4">
           Loading data…
         </p>
       )}
 
       {!loadingData && fetchError && (
-        <p
-          style={{
-            textAlign: "center",
-            marginTop: "1rem",
-            color: "#dc2626",
-            fontWeight: 500,
-          }}
-        >
+        <p className="text-center text-sm font-medium text-red-600 mt-4">
           Could not load data: {fetchError}
         </p>
       )}
 
       <FinancialFooter />
-    </div>
+    </main>
   );
 }
-
-// tiny inline styles for loading/error layouts
-const centerWrap: React.CSSProperties = {
-  minHeight: "80vh",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontFamily: "Inter, system-ui, sans-serif",
-};
-const denyBox: React.CSSProperties = {
-  backgroundColor: "#fff",
-  border: "1px solid #e5e7eb",
-  borderRadius: "0.75rem",
-  padding: "1rem 1.25rem",
-  maxWidth: "320px",
-  textAlign: "center",
-  color: "#dc2626",
-  fontWeight: 500,
-  fontSize: "0.9rem",
-  lineHeight: 1.4,
-  boxShadow:
-    "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-};
-const mutedText: React.CSSProperties = {
-  color: "#6b7280",
-  fontSize: "0.9rem",
-  lineHeight: 1.4,
-  fontWeight: 500,
-};
