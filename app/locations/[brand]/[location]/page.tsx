@@ -5,7 +5,16 @@ import { supabase } from '@/lib/supabaseClient'
 import { useParams } from 'next/navigation'
 
 export default function LocationPage() {
-  const { brand, location } = useParams()
+  // Tell TS what we expect from the dynamic route
+  const rawParams = useParams() as {
+    brand?: string
+    location?: string
+  }
+
+  // Graceful fallbacks
+  const brand = rawParams.brand ?? ''
+  const location = rawParams.location ?? ''
+
   const [resources, setResources] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -19,8 +28,11 @@ export default function LocationPage() {
         .eq('brand', brand)
         .eq('location', location)
 
-      if (error) setError(error.message)
-      else setResources(data || [])
+      if (error) {
+        setError(error.message)
+      } else {
+        setResources(data || [])
+      }
     }
 
     fetchData()
@@ -39,8 +51,14 @@ export default function LocationPage() {
       ) : (
         <div className="grid gap-4">
           {resources.map((r) => (
-            <div key={r.id} className="bg-white border p-4 rounded shadow">
+            <div
+              key={r.id}
+              className="bg-white border p-4 rounded shadow"
+            >
               <h2 className="font-medium">{r.title}</h2>
+              <p className="text-sm text-gray-600 mb-2">
+                {r.category}
+              </p>
               <a
                 href={r.link}
                 className="text-blue-600 underline"
