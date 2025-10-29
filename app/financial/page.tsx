@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CSVLink } from "react-csv";
 import { supabase } from "../../src/lib/supabaseClient";
 
-// financial components
 import FinancialHeader from "../../src/components/financial/FinancialHeader";
 import InsightsBar from "../../src/components/financial/InsightsBar";
 import ComplianceBar from "../../src/components/financial/ComplianceBar";
@@ -13,11 +12,10 @@ import KPIBlock from "../../src/components/financial/KPIBlock";
 import ChartSection from "../../src/components/financial/ChartSection";
 import FinancialFooter from "../../src/components/financial/FinancialFooter";
 
-// ─────────────────────────────────────────
-// CONSTANTS / CONFIG
-// ─────────────────────────────────────────
+// ─────────────────────────────
+// CONFIG / CONSTANTS
+// ─────────────────────────────
 
-// Public sheet + key (already in repo)
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
   "AIzaSyB_dkFpvk6w_d9dPD_mWVhfB8-lly-9FS8";
@@ -43,7 +41,7 @@ const BRAND_GROUPS: Record<string, string[]> = {
   ],
 };
 
-// All store tabs in the sheet, used for ranking
+// individual shops (also for ranking)
 const STORE_LOCATIONS = [
   "La Mia Mamma - Chelsea",
   "La Mia Mamma - Hollywood Road",
@@ -62,20 +60,23 @@ const PAYROLL_TARGET = 35; // %
 const FOOD_TARGET = 12.5; // %
 const DRINK_TARGET = 5.5; // %
 
+// ─────────────────────────────
+// HELPERS
+// ─────────────────────────────
+
 function formatCurrency(val: any) {
   if (val === undefined || val === null || isNaN(val)) return "£0";
   return "£" + Number(val).toLocaleString();
 }
 
-// turn "W43" => 43 as number
+// extract number from "W43"
 function parseWeekNum(weekStr: any) {
   const num = parseInt(String(weekStr || "").replace(/[^\d]/g, ""), 10);
   return isNaN(num) ? 0 : num;
 }
 
-// ISO week number (Mon-Sun ISO week)
+// ISO week (Mon-Sun)
 function getISOWeek(date = new Date()) {
-  // standard ISO week calc
   const d = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
   );
@@ -90,7 +91,7 @@ function getCurrentWeekLabel() {
   return `W${getISOWeek(new Date())}`;
 }
 
-// parse Google Sheets response -> array of row objects
+// parse a Google Sheets tab into objects
 function parseSheetValues(values: any[][] | undefined) {
   if (!values || values.length < 2) return [];
   const [headers, ...rows] = values;
@@ -112,7 +113,7 @@ function parseSheetValues(values: any[][] | undefined) {
   );
 }
 
-// fetch a single tab from GSheets
+// Fetch sheet tab
 async function fetchTab(tabName: string) {
   const range = `${tabName}!A1:Z100`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(
@@ -127,7 +128,7 @@ async function fetchTab(tabName: string) {
   return parseSheetValues(json.values);
 }
 
-// roll up many location rows (for a brand) by Week (sum numeric cols)
+// roll up brand tabs by Week
 function rollupByWeek(rowsArray: any[]) {
   if (!rowsArray.length) return [];
   const grouped: Record<string, any[]> = {};
@@ -156,18 +157,11 @@ function rollupByWeek(rowsArray: any[]) {
   merged.sort(
     (a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
   );
-
   return merged;
 }
 
-// map Week -> Period/Quarter to support rollups (Period, Quarter views)
+// Map Week → Period / Quarter (same mapping logic as before)
 function buildWeekToPeriodQuarter() {
-  // This is a manual mapping for 52w -> P1..P12, Q1..Q4
-  // The actual mapping we used earlier:
-  //  - W1-13  => Q1, split into P1,P2,P3
-  //  - W14-26 => Q2, split into P4,P5,P6
-  //  - W27-39 => Q3, split into P7,P8,P9
-  //  - W40-52 => Q4, split into P10,P11,P12
   return Array.from({ length: 52 }, (_, i) => {
     const w = i + 1;
     let periodVal;
@@ -189,7 +183,6 @@ function buildWeekToPeriodQuarter() {
   });
 }
 
-// turn weekly rows -> add Period / Quarter fields from mapping
 function decorateWithPeriodQuarter(rows: any[], mapArr: any[]) {
   return rows.map((item) => {
     const w = String(item.Week || "").trim();
@@ -202,7 +195,6 @@ function decorateWithPeriodQuarter(rows: any[], mapArr: any[]) {
   });
 }
 
-// group decorated rows by a bucket (Period or Quarter) summing numerics
 function groupMergedRowsByBucket(rows: any[], bucketKey: string) {
   if (!rows.length) return [];
   const grouped: Record<string, any[]> = {};
@@ -223,26 +215,22 @@ function groupMergedRowsByBucket(rows: any[], bucketKey: string) {
       sums[col] = groupRows.reduce((total, r) => total + (r[col] || 0), 0);
     });
     return {
-      Week: label, // for charts we still call it Week but it's "P#" or "Q#"
+      Week: label,
       ...sums,
     };
   });
 }
 
-// computeInsightsBundle
-// - Pick "last completed" week (currentWeek-1 with data).
-// - Compute 4-week avg Payroll_v% using signed values (negatives and positives).
+// build insights bundle for "last completed week"
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
 
-  // decorate with parsed numeric week
   const decorated = rows.map((r: any) => ({
     ...r,
     __weekNum: parseWeekNum(r.Week),
   }));
 
   const currentWeekNum = getISOWeek(new Date());
-  // last fully completed week:
   const snapshotWeekNum =
     currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
@@ -254,12 +242,12 @@ function computeInsightsBundle(rows: any[]) {
     );
   }
 
-  // Try exact match for snapshotWeekNum first
+  // try exact
   let latestRow = decorated.find(
     (r) => r.__weekNum === snapshotWeekNum && rowHasData(r)
   );
 
-  // Fallback: most recent <= snapshotWeekNum with data
+  // fallback <= snapshotWeekNum
   if (!latestRow) {
     const candidates = decorated
       .filter((r) => r.__weekNum <= snapshotWeekNum && rowHasData(r))
@@ -267,7 +255,7 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = candidates[candidates.length - 1];
   }
 
-  // Final fallback: just take last non-empty row at all
+  // final fallback any non-empty
   if (!latestRow) {
     const candidates = decorated
       .filter((r) => rowHasData(r))
@@ -275,13 +263,13 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = candidates[candidates.length - 1];
   }
 
-  if (!latestRow) return null; // still nothing
+  if (!latestRow) return null;
 
   const usedWeekNum = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${usedWeekNum}`;
 
-  // build window of last 4 weeks including that week
-  const windowWeeks = [
+  // last 4-week signed avg of Payroll_v%
+  const last4Weeks = [
     usedWeekNum,
     usedWeekNum - 1,
     usedWeekNum - 2,
@@ -289,7 +277,7 @@ function computeInsightsBundle(rows: any[]) {
   ].filter((n) => n > 0);
 
   const last4Rows = decorated.filter((r) =>
-    windowWeeks.includes(r.__weekNum)
+    last4Weeks.includes(r.__weekNum)
   );
 
   function parsePayrollVar(val: any): number {
@@ -299,7 +287,6 @@ function computeInsightsBundle(rows: any[]) {
     return Number.isNaN(num) ? 0 : num;
   }
 
-  // signed average (e.g. -4.2, +2.5, +2, -6.25 => avg -1.48)
   const payrollTrendVals = last4Rows.map((row) =>
     parsePayrollVar(row["Payroll_v%"])
   );
@@ -309,7 +296,6 @@ function computeInsightsBundle(rows: any[]) {
         payrollTrendVals.length
       : 0;
 
-  // calc metrics
   const salesActual = latestRow.Sales_Actual || 0;
   const salesBudget = latestRow.Sales_Budget || 0;
   const salesLastYear = latestRow.Sales_LastYear || 0;
@@ -353,7 +339,7 @@ function computeInsightsBundle(rows: any[]) {
   };
 }
 
-// ranking table data (site-level latest week)
+// build site ranking rows (only for admin/operation)
 async function buildRankingData(roleLower: string) {
   if (roleLower !== "admin" && roleLower !== "operation") {
     return [];
@@ -406,7 +392,7 @@ async function buildRankingData(roleLower: string) {
   return cleaned;
 }
 
-// y axis money formatter for charts
+// y-axis money ticks for charts
 function yTickFormatter(val: any) {
   if (val === 0) return "£0";
   if (!val) return "";
@@ -418,7 +404,7 @@ function tooltipFormatter(value: any, name: any) {
   return [formatCurrency(value), name];
 }
 
-// chartConfig for <ChartSection />
+// chart config for ChartSection
 const chartConfig = {
   Sales: [
     { key: "Sales_Actual", color: "#4ade80", name: "Actual" },
@@ -442,49 +428,49 @@ const chartConfig = {
   ],
 };
 
-// ─────────────────────────────────────────
-// MAIN PAGE COMPONENT
-// ─────────────────────────────────────────
+// ─────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────
 
 export default function FinancialPage() {
-  // auth/session/profile
+  // auth
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // allowed locations (dropdown)
+  // allowed locs
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
   const [initialLocation, setInitialLocation] = useState<string>("");
 
   // UI selections
   const [location, setLocation] = useState<string>("");
-  const [period, setPeriod] = useState<string>("Week"); // Week | Period | Quarter
+  const [period, setPeriod] = useState<string>("Week");
 
   // sheet data
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
-  // insights bundle (last week sales/payroll etc)
+  // insights
   const [insights, setInsights] = useState<any>(null);
 
-  // ranking table
+  // ranking
   const [rankingData, setRankingData] = useState<any[]>([]);
 
-  // chart tab state
+  // chart tab
   const [activeTab, setActiveTab] = useState<string>("Sales");
 
-  // data loading / errors
+  // loading states
   const [loadingData, setLoadingData] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string>("");
 
   const [currentWeekNow] = useState(getCurrentWeekLabel());
 
-  // build once
+  // week -> period/quarter map
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return buildWeekToPeriodQuarter();
   }, []);
 
-  // 1. watch auth session
+  // watch session
   useEffect(() => {
     let sub: any;
     async function init() {
@@ -512,7 +498,7 @@ export default function FinancialPage() {
     };
   }, []);
 
-  // 2. load profile
+  // load profile, decide which locations they may see
   useEffect(() => {
     async function loadProfile() {
       if (!session) {
@@ -542,7 +528,6 @@ export default function FinancialPage() {
       const roleLower = String(data.role || "").toLowerCase();
       let locs: string[] = [];
 
-      // admin / operation can see everything
       if (roleLower === "admin" || roleLower === "operation") {
         locs = [
           "GroupOverview",
@@ -552,34 +537,27 @@ export default function FinancialPage() {
           ...STORE_LOCATIONS,
         ];
       } else if (roleLower === "manager") {
-        // manager sees only their home_location
-        if (data.home_location) {
-          locs = [data.home_location];
-        }
+        if (data.home_location) locs = [data.home_location];
       } else {
-        // default: restrict (shouldn't normally hit finance anyway)
-        if (data.home_location) {
-          locs = [data.home_location];
-        }
+        if (data.home_location) locs = [data.home_location];
       }
 
       setAllowedLocations(locs);
       setInitialLocation(locs[0] || "");
-
       setAuthLoading(false);
     }
 
     loadProfile();
   }, [session]);
 
-  // 3. keep local location in sync with first allowed
+  // sync first allowed location into local select
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // 4. fetch sheet rows for selected location/brand/group
+  // fetch rows for current location
   useEffect(() => {
     async function loadRows() {
       if (!location) return;
@@ -592,13 +570,11 @@ export default function FinancialPage() {
         let rows: any[] = [];
 
         if (isBrand) {
-          // aggregate brand across multiple site tabs
           const allData = await Promise.all(
             BRAND_GROUPS[location].map((site) => fetchTab(site))
           );
           rows = rollupByWeek(allData.flat());
         } else {
-          // single site or "GroupOverview"
           rows = await fetchTab(location);
           rows.sort(
             (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
@@ -607,9 +583,8 @@ export default function FinancialPage() {
 
         setRawRows(rows);
 
-        // precompute insights bundle from these weekly rows
-        const snapshot = computeInsightsBundle(rows);
-        setInsights(snapshot);
+        const snap = computeInsightsBundle(rows);
+        setInsights(snap);
       } catch (err: any) {
         console.error(err);
         setRawRows([]);
@@ -625,7 +600,7 @@ export default function FinancialPage() {
     loadRows();
   }, [location]);
 
-  // 5. rebuild filteredData whenever rawRows or period changes
+  // rebuild filteredData whenever rawRows or period changes
   useEffect(() => {
     if (!rawRows.length) {
       setFilteredData([]);
@@ -633,7 +608,6 @@ export default function FinancialPage() {
     }
 
     if (period === "Week") {
-      // decorate so KPIBlock & chart x-axis show "W##"
       const decorated = decorateWithPeriodQuarter(
         rawRows,
         WEEK_TO_PERIOD_QUARTER
@@ -652,7 +626,6 @@ export default function FinancialPage() {
       return;
     }
 
-    // Quarter
     const decorated = decorateWithPeriodQuarter(
       rawRows,
       WEEK_TO_PERIOD_QUARTER
@@ -661,7 +634,7 @@ export default function FinancialPage() {
     setFilteredData(quarterAgg);
   }, [rawRows, period, WEEK_TO_PERIOD_QUARTER]);
 
-  // 6. build ranking table (only admins / ops)
+  // build ranking (admin/operation only)
   useEffect(() => {
     async function loadRanking() {
       const roleLower = String(profile?.role || "").toLowerCase();
@@ -671,16 +644,14 @@ export default function FinancialPage() {
     loadRanking();
   }, [profile]);
 
-  // ─────────────────────────────────────────
-  //  RENDER GUARDS
-  // ─────────────────────────────────────────
-
+  // role gate
   const roleLower = String(profile?.role || "").toLowerCase();
   const canViewFinance =
     roleLower === "admin" ||
     roleLower === "operation" ||
     roleLower === "manager";
 
+  // ────────── GUARDS ──────────
   if (authLoading) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center text-sm text-gray-500 font-medium">
@@ -719,69 +690,73 @@ export default function FinancialPage() {
     );
   }
 
-  // ─────────────────────────────────────────
-  //  PAGE LAYOUT
-  // ─────────────────────────────────────────
-
+  // ────────── PAGE UI ──────────
   return (
     <div className="bg-gray-50 min-h-screen text-gray-900 font-[Inter,system-ui,sans-serif]">
-      {/* SINGLE HEADER (this kills the duplicate) */}
+      {/* SINGLE HEADER */}
       <div className="w-full bg-white border-b border-gray-200">
         <FinancialHeader />
       </div>
 
-      {/* FILTER ROW (LOCATION / VIEW) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="text-center text-[0.7rem] font-semibold uppercase tracking-wide text-gray-500 mb-4">
-          Filters
-        </div>
-
-        <div className="grid max-w-xl mx-auto gap-6 sm:grid-cols-2">
-          {/* Location select */}
-          <div className="flex flex-col items-center">
-            <label className="text-[0.7rem] font-semibold uppercase tracking-wide text-gray-700 mb-2">
-              Location
-            </label>
-            <select
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full rounded-full border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10 max-w-xs"
-            >
-              {allowedLocations.map((loc) => (
-                <option key={loc}>{loc}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Period select */}
-          <div className="flex flex-col items-center">
-            <label className="text-[0.7rem] font-semibold uppercase tracking-wide text-gray-700 mb-2">
-              View
-            </label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="w-full rounded-full border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10 max-w-xs"
-            >
-              {PERIODS.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </section>
-
-      {/* DASHBOARD CONTENT WRAPPER */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 space-y-10">
-        {/* HERO INSIGHTS (Current Week + Last Week Results) */}
+        {/* Top row: title + filters (this is the layout you had before) */}
+        <section className="pt-6">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+            {/* Left: Performance / Current Week */}
+            <div>
+              <div className="text-sm font-semibold text-gray-800">
+                Performance 2025
+              </div>
+              <div className="text-xs text-gray-500">
+                Current Week: {currentWeekNow}
+              </div>
+            </div>
+
+            {/* Right: filters side by side */}
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4 lg:gap-6">
+              {/* Location */}
+              <div className="flex flex-col text-left">
+                <label className="text-[0.7rem] font-semibold uppercase tracking-wide text-gray-700 mb-1">
+                  Select Location
+                </label>
+                <select
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="rounded-full border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10 min-w-[14rem]"
+                >
+                  {allowedLocations.map((loc) => (
+                    <option key={loc}>{loc}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Period */}
+              <div className="flex flex-col text-left">
+                <label className="text-[0.7rem] font-semibold uppercase tracking-wide text-gray-700 mb-1">
+                  Select Period
+                </label>
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  className="rounded-full border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10 min-w-[10rem]"
+                >
+                  {PERIODS.map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Hero cards row: Current Week + Last Week Results */}
         <InsightsBar
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
           currentWeekNow={currentWeekNow}
         />
 
-        {/* Compliance row (Payroll %, Food %, Drink %, Sales vs LY)
-            This already shows the big coloured dot and targets based on last week. */}
+        {/* KPI tiles row: Payroll%, Food%, Drink%, Sales vs LY */}
         <ComplianceBar
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
@@ -789,7 +764,7 @@ export default function FinancialPage() {
           drinkTarget={DRINK_TARGET}
         />
 
-        {/* Ranking table (admins / ops only) */}
+        {/* Ranking table (admin / operation only) */}
         {(roleLower === "admin" || roleLower === "operation") &&
           rankingData.length > 0 && (
             <RankingTable
@@ -800,7 +775,7 @@ export default function FinancialPage() {
             />
           )}
 
-        {/* KPI block (Totals / Variance cards etc), for the chosen view (Week/Period/Quarter) */}
+        {/* KPI block (totals / budget variance etc) */}
         {loadingData && (
           <p className="text-center text-sm text-gray-500 mt-4">
             Loading data…
@@ -822,7 +797,7 @@ export default function FinancialPage() {
           />
         )}
 
-        {/* TAB SWITCHER (Sales / Payroll / Food / Drink) */}
+        {/* Tab buttons for charts */}
         <div className="flex justify-center flex-wrap gap-2 mt-8">
           {TABS.map((tab) => (
             <button
@@ -839,7 +814,7 @@ export default function FinancialPage() {
           ))}
         </div>
 
-        {/* CHARTS + CSV EXPORT */}
+        {/* Charts + CSV Download */}
         {!loadingData && !fetchError && (
           <ChartSection
             activeTab={activeTab}
@@ -852,7 +827,6 @@ export default function FinancialPage() {
         )}
       </main>
 
-      {/* FOOTER */}
       <FinancialFooter />
     </div>
   );
