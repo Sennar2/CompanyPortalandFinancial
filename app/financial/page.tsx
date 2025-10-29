@@ -7,12 +7,17 @@ import { supabase } from "@/lib/supabaseClient";
 import { CSVLink } from "react-csv";
 
 // Components we already have
-import InsightsBar from "../../components/financial/InsightsBar";
-import ComplianceBar from "../../components/financial/ComplianceBar";
-import RankingTable from "../../components/financial/RankingTable";
-import KPIBlock from "../../components/financial/KPIBlock";
-import ChartSection from "../../components/financial/ChartSection";
-import FinancialFooter from "../../components/financial/FinancialFooter";
+
+// components live in src/components/financial/
+import FinancialFooter from "../../src/components/financial/FinancialFooter";
+import RankingTable from "../../src/components/financial/RankingTable";
+import KPIBlock from "../../src/components/financial/KPIBlock";
+import ChartSection from "../../src/components/financial/ChartSection";
+import ComplianceBar from "../../src/components/financial/ComplianceBar";
+import InsightsBar from "../../src/components/financial/InsightsBar";
+
+// if you're still using FinancialHeader from this folder, import it too:
+import FinancialHeader from "../../src/components/financial/FinancialHeader";
 
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
