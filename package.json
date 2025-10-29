@@ -1,0 +1,30 @@
+{
+  "name": "company-portal2",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.3",
+    "framer-motion": "^12.23.24",
+    "ical.js": "^2.1.0",
+    "next": "15.3.1",
+    "prop-types": "^15.8.1",
+    "react": "18.2.0",
+    "react-countup": "^6.5.3",
+    "react-csv": "^2.2.2",
+    "react-dom": "18.2.0",
+    "react-is": "^19.2.0",
+    "recharts": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.2",
+    "autoprefixer": "^10.4.13",
+    "postcss": "^8.4.21",
+    "tailwindcss": "^3.4.1",
+    "typescript": "5.8.3"
+  }
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "name": "La Mia Mamma",
+    "slug": "la-mia-mamma",
+    "locations": [
+      { "name": "Battersea", "slug": "battersea" },
+      { "name": "King's Road", "slug": "chelsea" },
+      { "name": "Hollywood Road", "slug": "hollywood-road" },
+      { "name": "Notting Hill", "slug": "notting-hill" }
+    ]
+  },
+  {
+    "name": "Made in Italy",
+    "slug": "made-in-italy",
+    "locations": [
+      { "name": "Chelsea", "slug": "chelsea" }
+      
+    ]
+  },
+  {
+    "name": "Fish and Bubbles",
+    "slug": "fish-and-bubbles",
+    "locations": [
+      { "name": "Notting Hill", "slug": "notting-hill" },
+      { "name": "Fulham", "slug": "fulham" }
+    ]
+  },
+    {
+    "name": "Company",
+    "slug": "company",
+    "locations": [
+      { "name": "HR", "slug": "hr" },
+      { "name": "Finance", "slug": "finance" },
+       { "name": "IT", "slug": "it" },
+       { "name": "Marketing", "slug": "marketing" },
+      { "name": "Health and Safety", "slug": "health-and-safety" }
+    ]
+  }
+]
