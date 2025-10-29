@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 
-// ⭐ IMPORT ALL FINANCIAL COMPONENTS USING ../../src/... ⭐
+// ✅ financial components (all default exports)
 import FinancialHeader from "../../src/components/financial/FinancialHeader";
 import InsightsBar from "../../src/components/financial/InsightsBar";
 import ComplianceBar from "../../src/components/financial/ComplianceBar";
@@ -62,8 +62,8 @@ const TABS = ["Sales", "Payroll", "Food", "Drink"];
 
 // targets
 const PAYROLL_TARGET = 35; // %
-const FOOD_TARGET = 12.5;  // %
-const DRINK_TARGET = 5.5;  // %
+const FOOD_TARGET = 12.5; // %
+const DRINK_TARGET = 5.5; // %
 
 // ─────────────────────────────
 // SMALL HELPERS
@@ -89,7 +89,9 @@ function getISOWeek(date = new Date()) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const weekNo = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
   return weekNo > 52 ? 52 : weekNo;
 }
 function getCurrentWeekLabel() {
@@ -203,7 +205,7 @@ function mergeRowsWithPeriodQuarter(rows: any[], W2PQ: any[]) {
   });
 }
 
-// Summarise array of rows into "bucketKey" = Week, Period, or Quarter
+// Summarise array of rows into "Period" or "Quarter"
 function groupMergedRowsBy(mergedRows: any[], bucketKey: "Period" | "Quarter") {
   if (!mergedRows.length) return [];
 
@@ -245,7 +247,7 @@ function computeInsightsBundle(rows: any[]) {
   const snapshotWeekNum =
     currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
-  // row has data?
+  // does row have useful data?
   function rowHasData(r: any) {
     return (
       (r.Sales_Actual && r.Sales_Actual !== 0) ||
@@ -267,7 +269,7 @@ function computeInsightsBundle(rows: any[]) {
     latestRow = candidates[candidates.length - 1];
   }
 
-  // final fallback: just most recent row with data overall
+  // final fallback: most recent row with data overall
   if (!latestRow) {
     const candidates = decorated
       .filter((r: any) => rowHasData(r))
@@ -280,7 +282,7 @@ function computeInsightsBundle(rows: any[]) {
   const weekNumWeUse = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${weekNumWeUse}`;
 
-  // window for 4-week avg of Payroll_v%
+  // 4-week window for avg Payroll_v%
   const windowWeeks = [
     weekNumWeUse,
     weekNumWeUse - 1,
@@ -339,7 +341,7 @@ function computeInsightsBundle(rows: any[]) {
       : 0;
 
   return {
-    wkLabel, // e.g. "W43"
+    wkLabel, // "W43"
     salesActual,
     salesBudget,
     salesVar,
@@ -349,7 +351,7 @@ function computeInsightsBundle(rows: any[]) {
     drinkPct,
     salesVsLastYearPct,
     avgPayrollVar4w,
-    currentWeekLabel: getCurrentWeekLabel(), // "W44"
+    currentWeekLabel: getCurrentWeekLabel(), // e.g. "W44"
   };
 }
 
@@ -378,18 +380,15 @@ export default function FinancialPage() {
   const [fetchError, setFetchError] = useState("");
 
   // derived
-  const [insights, setInsights] = useState<any>(null); // last week bundle
-  const [rankingData, setRankingData] = useState<any[]>([]); // site table
+  const [insights, setInsights] = useState<any>(null);
+  const [rankingData, setRankingData] = useState<any[]>([]);
 
-  const currentWeekNow = getCurrentWeekLabel(); // e.g. "W44"
+  const currentWeekNow = getCurrentWeekLabel(); // "W44"
 
-  // ------------------------------------------------
-  // AUTH: pull session, profile, allowed locations
-  // ------------------------------------------------
+  // AUTH: subscribe to session changes
   useEffect(() => {
     let sub: any;
     async function initAuth() {
-      // session
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -414,7 +413,7 @@ export default function FinancialPage() {
     };
   }, []);
 
-  // load profile when session is ready
+  // load profile once we have session
   useEffect(() => {
     async function loadProfile() {
       if (!session) {
@@ -456,7 +455,7 @@ export default function FinancialPage() {
       } else if (roleLower === "manager") {
         locs = [data.home_location || STORE_LOCATIONS[0]];
       } else {
-        // basic user shouldn't really be here
+        // fallback for basic user (shouldn't really access finance)
         locs = [data.home_location || STORE_LOCATIONS[0]];
       }
 
@@ -479,18 +478,14 @@ export default function FinancialPage() {
     await supabase.auth.signOut();
   }
 
-  // ------------------------------------------------
-  // Once we know initialLocation, set it into state
-  // ------------------------------------------------
+  // set default location when allowedLocations arrive
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // ------------------------------------------------
-  // Fetch SHEET data (for selected location or brand/group)
-  // ------------------------------------------------
+  // fetch sheet data whenever location changes
   useEffect(() => {
     async function loadData() {
       if (!location) return;
@@ -502,13 +497,11 @@ export default function FinancialPage() {
         let rows: any[] = [];
 
         if (isBrand) {
-          // brand rollup across multiple tabs
           const allData = await Promise.all(
             BRAND_GROUPS[location].map((site) => fetchTab(site))
           );
           rows = rollupByWeek(allData.flat());
         } else {
-          // direct tab (GroupOverview or single site)
           rows = await fetchTab(location);
           rows.sort(
             (a: any, b: any) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
@@ -533,9 +526,7 @@ export default function FinancialPage() {
     loadData();
   }, [location]);
 
-  // ------------------------------------------------
-  // Build RANKING table (for ops/admin only)
-  // ------------------------------------------------
+  // build ranking (admin/ops only)
   useEffect(() => {
     async function buildRanking() {
       if (roleLower !== "admin" && roleLower !== "operation") {
@@ -587,7 +578,6 @@ export default function FinancialPage() {
         );
 
         const cleaned = result.filter(Boolean) as any[];
-        // sort by highest payroll%
         cleaned.sort((a, b) => b.payrollPct - a.payrollPct);
         setRankingData(cleaned);
       } catch (err) {
@@ -599,9 +589,7 @@ export default function FinancialPage() {
     buildRanking();
   }, [roleLower]);
 
-  // ------------------------------------------------
-  // Derive filteredData for KPIBlock + charts (Week/Period/Quarter)
-  // ------------------------------------------------
+  // build merged rows with Period+Quarter and filtered data for selected period
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => buildWeekPeriodQuarterMap(), []);
   const mergedRows = useMemo(
     () => mergeRowsWithPeriodQuarter(rawRows, WEEK_TO_PERIOD_QUARTER),
@@ -649,9 +637,7 @@ export default function FinancialPage() {
     return [formatCurrency(value), name];
   };
 
-  // ------------------------------------------------
   // GUARDS (auth / access)
-  // ------------------------------------------------
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm text-gray-500">
@@ -696,18 +682,14 @@ export default function FinancialPage() {
     );
   }
 
-  // ------------------------------------------------
   // MAIN UI
-  // ------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-[system-ui]">
-      {/* TOP PORTAL HEADER (same vibe as homepage header) */}
+      {/* header bar */}
       <div className="w-full bg-white border-b border-gray-200">
         <FinancialHeader
           profile={profile}
           onSignOut={handleSignOut}
-          // these props exist on FinancialHeader in your repo:
-          // allowedLocations, location, setLocation, period, setPeriod, PERIODS
           allowedLocations={allowedLocations}
           location={location}
           setLocation={setLocation}
@@ -717,9 +699,9 @@ export default function FinancialPage() {
         />
       </div>
 
-      {/* PAGE WRAPPER */}
+      {/* page body */}
       <main className="max-w-7xl mx-auto px-4 py-6 flex flex-col gap-6">
-        {/* PAGE TITLE + CURRENT WEEK */}
+        {/* title / meta */}
         <section className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
           <div>
             <h1 className="text-lg font-semibold text-gray-900">
@@ -730,12 +712,11 @@ export default function FinancialPage() {
             </p>
           </div>
 
-          {/* FILTER BAR (centered on mobile, right on desktop) */}
+          {/* inline filters (for desktop), mirrors FinancialHeader but we keep it here for visual balance */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-sm">
-            {/* Location select */}
             <div className="flex flex-col">
               <label className="text-[11px] font-medium text-gray-600">
-                Select Location
+                Location
               </label>
               <select
                 value={location}
@@ -750,10 +731,9 @@ export default function FinancialPage() {
               </select>
             </div>
 
-            {/* Period select */}
             <div className="flex flex-col">
               <label className="text-[11px] font-medium text-gray-600">
-                Select Period
+                Period
               </label>
               <select
                 value={period}
@@ -770,14 +750,14 @@ export default function FinancialPage() {
           </div>
         </section>
 
-        {/* HERO INSIGHTS (Current Week + Last Week Results) */}
+        {/* HERO INSIGHTS */}
         <InsightsBar
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
           currentWeekNow={currentWeekNow}
         />
 
-        {/* KPI ROW (Payroll / Food / Drink / Sales vs LY) */}
+        {/* COMPLIANCE / KPI SNAPSHOT */}
         <ComplianceBar
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
@@ -785,7 +765,7 @@ export default function FinancialPage() {
           drinkTarget={DRINK_TARGET}
         />
 
-        {/* SITE RANKING (ops/admin only) */}
+        {/* RANKING TABLE (admin / ops only) */}
         {(roleLower === "admin" || roleLower === "operation") &&
           rankingData.length > 0 && (
             <RankingTable
@@ -796,7 +776,7 @@ export default function FinancialPage() {
             />
           )}
 
-        {/* KPI BLOCK (aggregates for chosen period) */}
+        {/* KPI AGG BLOCK */}
         {loadingData ? (
           <p className="text-center text-gray-500 text-sm">
             Loading data…
@@ -814,7 +794,7 @@ export default function FinancialPage() {
           />
         )}
 
-        {/* TAB SWITCHER: Sales / Payroll / Food / Drink */}
+        {/* TABS SWITCHER */}
         <div className="flex flex-wrap justify-center gap-2">
           {TABS.map((tab) => (
             <button
@@ -831,7 +811,7 @@ export default function FinancialPage() {
           ))}
         </div>
 
-        {/* CHART SECTION */}
+        {/* CHARTS */}
         {!loadingData && !fetchError && (
           <ChartSection
             activeTab={activeTab}
