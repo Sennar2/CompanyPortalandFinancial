@@ -63,7 +63,9 @@ function getISOWeek(date = new Date()) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const weekNo = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
   return weekNo > 52 ? 52 : weekNo;
 }
 function getCurrentWeekLabel() {
@@ -124,7 +126,10 @@ function rollupByWeek(rowsArray: any[]) {
   const merged = Object.entries(grouped).map(([weekLabel, rows]) => {
     const totals: Record<string, number> = {};
     numericKeys.forEach((col) => {
-      totals[col] = rows.reduce((sum, r) => sum + (r[col] || 0), 0);
+      totals[col] = (rows as any[]).reduce(
+        (sum, r: any) => sum + (r[col] || 0),
+        0
+      );
     });
     return {
       Week: weekLabel,
@@ -154,7 +159,8 @@ function computeInsightsBundle(rows: any[]) {
   }
 
   const currentWeekNum = getISOWeek(new Date());
-  const snapshotWeekNum = currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
+  const snapshotWeekNum =
+    currentWeekNum - 1 <= 0 ? currentWeekNum : currentWeekNum - 1;
 
   let latestRow = decorated.find(
     (r) => r.__weekNum === snapshotWeekNum && rowHasData(r)
@@ -194,11 +200,14 @@ function computeInsightsBundle(rows: any[]) {
   }
 
   const last4Rows = decorated.filter((r) => windowWeeks.includes(r.__weekNum));
-  const payrollTrendVals = last4Rows.map((row) => parsePayrollVar(row['Payroll_v%']));
+  const payrollTrendVals = last4Rows.map((row) =>
+    parsePayrollVar(row['Payroll_v%'])
+  );
 
   const avgPayrollVar4w =
     payrollTrendVals.length > 0
-      ? payrollTrendVals.reduce((sum, n) => sum + n, 0) / payrollTrendVals.length
+      ? payrollTrendVals.reduce((sum, n) => sum + n, 0) /
+        payrollTrendVals.length
       : 0;
 
   const salesActual = latestRow.Sales_Actual || 0;
@@ -208,9 +217,10 @@ function computeInsightsBundle(rows: any[]) {
   const salesVar = salesActual - salesBudget;
   const salesVarPct = salesBudget !== 0 ? (salesVar / salesBudget) * 100 : 0;
 
-  const payrollPct = salesActual !== 0
-    ? (latestRow.Payroll_Actual / salesActual) * 100
-    : 0;
+  const payrollPct =
+    salesActual !== 0
+      ? (latestRow.Payroll_Actual / salesActual) * 100
+      : 0;
 
   return {
     wkLabel, // e.g. "W43"
@@ -243,15 +253,9 @@ function formatCurrency(val: number | undefined | null) {
 }
 
 // ─────────────────────────────
-// components (inline small pieces)
+// tiny UI helpers
 // ─────────────────────────────
-
-// pill status tick/cross
-function TargetStatus({
-  isGood,
-}: {
-  isGood: boolean;
-}) {
+function TargetStatus({ isGood }: { isGood: boolean }) {
   return (
     <span
       className={
@@ -276,11 +280,9 @@ function InsightsHero({
 }) {
   if (!insights) return null;
 
-  const payrollIsGood = insights.payrollPct <= payrollTarget;
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* Current Week card */}
+      {/* Current Week */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="text-xs text-gray-500 font-medium mb-4">
           Current Week
@@ -293,7 +295,7 @@ function InsightsHero({
         </p>
       </div>
 
-      {/* Last Week Results card */}
+      {/* Last Week Results */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col justify-between">
         <div className="flex items-start justify-between">
           <div className="text-xs text-gray-500 font-medium">
@@ -304,7 +306,6 @@ function InsightsHero({
           </div>
         </div>
 
-        {/* Sales vs Budget */}
         <div className="mt-3">
           <div className="text-sm font-semibold text-gray-800">
             Sales vs Budget
@@ -321,7 +322,6 @@ function InsightsHero({
           </div>
         </div>
 
-        {/* Payroll % */}
         <div className="mt-4">
           <div className="text-sm font-semibold text-gray-800 flex items-center">
             Payroll %
@@ -338,7 +338,7 @@ function InsightsHero({
   );
 }
 
-// small KPI card under hero
+// KPI metric cards row under hero
 function MetricCard({
   label,
   weekLabel,
@@ -426,7 +426,12 @@ function RankingTable({
             const fGood = row.foodPct <= foodTarget;
             const dGood = row.drinkPct <= drinkTarget;
 
-            const rowBg = idx === 0 ? 'bg-red-50/60' : idx % 2 === 1 ? 'bg-white' : 'bg-gray-50/30';
+            const rowBg =
+              idx === 0
+                ? 'bg-red-50/60'
+                : idx % 2 === 1
+                ? 'bg-white'
+                : 'bg-gray-50/30';
 
             return (
               <tr key={row.location} className={rowBg}>
@@ -584,14 +589,14 @@ export default function FinancialPage() {
     await supabase.auth.signOut();
   }
 
-  // once we know the initialLocation, sync -> location
+  // sync initialLocation -> location once available
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // map week->period->quarter for aggregations
+  // PRECOMPUTE WEEK → PERIOD / QUARTER MAP
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return Array.from({ length: 52 }, (_, i) => {
       const w = i + 1;
@@ -614,7 +619,7 @@ export default function FinancialPage() {
     });
   }, []);
 
-  // inject Period / Quarter into each row
+  // inject Period / Quarter columns
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || '').trim();
@@ -627,32 +632,39 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
+  // group rows for Period/Quarter view
   function groupMergedRowsBy(bucketKey: 'Period' | 'Quarter') {
     if (!mergedRows.length) return [];
 
+    // build dictionary of label -> array<row>
     const grouped = mergedRows.reduce((acc, row) => {
-      const key = row[bucketKey];
+      const key = (row as any)[bucketKey];
       if (!acc[key]) acc[key] = [];
       acc[key].push(row);
       return acc;
     }, {} as Record<string, any[]>);
 
     const numericKeys = Object.keys(mergedRows[0]).filter(
-      (k) => typeof mergedRows[0][k] === 'number'
+      (k) => typeof (mergedRows[0] as any)[k] === 'number'
     );
 
     return Object.entries(grouped).map(([label, rows]) => {
+      const rowArr = rows as any[]; // <- cast fixes TS "unknown"
       const sums: Record<string, number> = {};
       numericKeys.forEach((col) => {
-        sums[col] = rows.reduce((total, r) => total + (r[col] || 0), 0);
+        sums[col] = rowArr.reduce(
+          (total, r) => total + ((r as any)[col] || 0),
+          0
+        );
       });
       return {
-        Week: label, // keep shape consistent
+        Week: label, // keep shape consistent-ish with "Week"
         ...sums,
       };
     });
   }
 
+  // final data depending on period dropdown
   const filteredData = useMemo(() => {
     if (!mergedRows.length) return [];
     if (period === 'Week') return mergedRows;
@@ -661,7 +673,7 @@ export default function FinancialPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRows, period]);
 
-  // load sheet rows for current dropdown location
+  // load sheet data for selected location
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -694,10 +706,13 @@ export default function FinancialPage() {
     load();
   }, [location]);
 
-  // compute "insights" for hero section
-  const insights = useMemo(() => computeInsightsBundle(mergedRows), [mergedRows]);
+  // compute hero insight snapshot
+  const insights = useMemo(
+    () => computeInsightsBundle(mergedRows),
+    [mergedRows]
+  );
 
-  // build ranking data (latest completed week per store) for admins/ops
+  // build ranking data
   useEffect(() => {
     async function buildRanking() {
       const roleLower = (profile?.role || '').toLowerCase();
@@ -716,7 +731,7 @@ export default function FinancialPage() {
               (a, b) => parseWeekNum(a.Week) - parseWeekNum(b.Week)
             );
 
-            // choose last completed data week (same computeInsightsBundle idea)
+            // similar "last completed week" logic
             const decorated = sorted.map((r: any) => ({
               ...r,
               __weekNum: parseWeekNum(r.Week),
@@ -838,13 +853,12 @@ export default function FinancialPage() {
   // ─────────────────────────────
   return (
     <main className="bg-gray-50 min-h-screen text-gray-900 font-[system-ui]">
-      {/* TOP STRIP from Company Portal header */}
+      {/* TOP STRIP - matches portal header */}
       <header className="w-full border-b bg-white/90 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-start sm:justify-between px-4 py-3">
-          {/* left side: portal branding */}
+          {/* left side: logo + brand */}
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0">
-              {/* if you have /logo.png on prod, keep <img>, avoids next/image hassle on vercel */}
               <img
                 src="/logo.png"
                 alt="La Mia Mamma"
@@ -861,7 +875,7 @@ export default function FinancialPage() {
             </div>
           </div>
 
-          {/* right side: role + logout */}
+          {/* right side: admin pill + name + logout */}
           <div className="flex items-center gap-3 mt-3 sm:mt-0 text-sm">
             {profile.role?.toLowerCase() === 'admin' && (
               <a
@@ -890,10 +904,10 @@ export default function FinancialPage() {
           </div>
         </div>
 
-        {/* FINANCIAL PERFORMANCE TITLE + FILTERS */}
+        {/* FINANCIAL PERFORMANCE HEADER BLOCK */}
         <div className="border-t border-gray-200 bg-white">
           <div className="max-w-7xl mx-auto px-4 py-6">
-            {/* centered heading */}
+            {/* centered headline */}
             <div className="text-center mb-6">
               <div className="text-base font-semibold text-gray-900">
                 Financial Performance
@@ -961,7 +975,7 @@ export default function FinancialPage() {
             good={(insights?.payrollPct || 0) <= PAYROLL_TARGET}
           />
 
-          {/* Food %  -- currently we don't have foodPct in final insights bundle, so keep 0 for now */}
+          {/* Food % placeholder */}
           <MetricCard
             label="Food %"
             weekLabel={insights?.wkLabel || '–'}
@@ -970,7 +984,7 @@ export default function FinancialPage() {
             good={0 <= FOOD_TARGET}
           />
 
-          {/* Drink %  -- same idea: 0 fallback */}
+          {/* Drink % placeholder */}
           <MetricCard
             label="Drink %"
             weekLabel={insights?.wkLabel || '–'}
@@ -979,8 +993,7 @@ export default function FinancialPage() {
             good={0 <= DRINK_TARGET}
           />
 
-          {/* Sales vs LY %  -- not calculated in insights bundle above, we just can't drop this card yet
-              so placeholder to keep visual parity */}
+          {/* Sales vs LY placeholder */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col">
             <div className="text-xs text-gray-500 font-medium flex flex-wrap items-center gap-1">
               <span className="text-gray-900 font-semibold">Sales vs LY</span>
@@ -996,7 +1009,6 @@ export default function FinancialPage() {
             </div>
 
             <div className="text-green-600 text-xl font-semibold mt-2 flex items-center">
-              {/* placeholder 0.0% */}
               0.0% <TargetStatus isGood={true} />
             </div>
           </div>
@@ -1024,14 +1036,6 @@ export default function FinancialPage() {
           )}
         </div>
       </section>
-
-      {/* SIMPLE FOOTER */}
-      <footer className="text-center text-[11px] text-gray-400 py-8">
-        <div>© {new Date().getFullYear()} La Mia Mamma Group</div>
-        <div className="text-gray-300">
-          Internal use only • Confidential
-        </div>
-      </footer>
     </main>
   );
 }
