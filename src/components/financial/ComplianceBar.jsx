@@ -1,5 +1,36 @@
 // src/components/financial/ComplianceBar.jsx
-import React from "react";
+
+/**
+ * ComplianceBar
+ *
+ * Shows last completed week's compliance snapshot:
+ * - Payroll %
+ * - Food %
+ * - Drink %
+ * - Sales vs LY %
+ *
+ * We also render the traffic-light dot based on avgPayrollVar4w:
+ *   abs(avgPayrollVar4w) < 1     => green
+ *   1 <= abs(avgPayrollVar4w) < 2 => amber
+ *   abs(avgPayrollVar4w) >= 2    => red
+ *
+ * Props:
+ *   insights: {
+ *     wkLabel: string;                // e.g. "W43"
+ *     payrollPct: number;
+ *     foodPct: number;
+ *     drinkPct: number;
+ *     salesVsLastYearPct: number;
+ *     avgPayrollVar4w: number;        // last-4-week avg of Payroll_v%
+ *   } | null
+ *
+ *   payrollTarget: number (e.g. 35)
+ *   foodTarget: number    (e.g. 12.5)
+ *   drinkTarget: number   (e.g. 5.5)
+ *
+ *   complianceSnapshot?: same shape as insights (OPTIONAL)
+ *     - if not provided, we reuse `insights`.
+ */
 
 export default function ComplianceBar({
   insights,
@@ -8,164 +39,221 @@ export default function ComplianceBar({
   drinkTarget,
   complianceSnapshot,
 }) {
-  if (!insights) return null;
+  // Fallback so Vercel build doesn't explode:
+  const snapshot = complianceSnapshot ?? insights;
 
-  // pick dot color from complianceSnapshot.colourClass
-  let dotColor = "#10b981"; // green
-  if (complianceSnapshot?.colourClass === "amber") {
-    dotColor = "#facc15";
-  } else if (complianceSnapshot?.colourClass === "red") {
-    dotColor = "#ef4444";
-  }
-
-  const wkLabel = complianceSnapshot?.wkLabel || insights.wkLabel || "";
-
-  // helper to render each KPI compliance card
-  function ComplianceCard({
-    title,
-    valuePct,
-    targetText,
-    inTarget,
-  }) {
+  if (!snapshot) {
     return (
-      <div
+      <section
         style={{
-          backgroundColor: "#fff",
-          borderRadius: "0.75rem",
-          border: "1px solid #e5e7eb",
-          boxShadow:
-            "0 24px 40px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+          maxWidth: "1280px",
+          margin: "1rem auto",
           padding: "1rem",
-          minWidth: "200px",
-          flex: "1 1 200px",
-          fontSize: "0.9rem",
-          lineHeight: 1.4,
-          color: "#111827",
+          fontFamily: "Inter, system-ui, sans-serif",
+          fontSize: "0.8rem",
+          color: "#6b7280",
+          textAlign: "center",
         }}
       >
-        {/* header row inside card */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            color: "#111827",
-            marginBottom: "0.5rem",
-          }}
-        >
-          <span>{title}</span>
-
-          <span
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              color: "#6b7280",
-              fontSize: "0.75rem",
-              fontWeight: 400,
-            }}
-          >
-            {/* only show dot on Payroll card (first card),
-                for the others we still show wk + Target but no dot */}
-            {title === "Payroll %" && (
-              <span
-                style={{
-                  width: "16px",
-                  height: "16px",
-                  borderRadius: "9999px",
-                  backgroundColor: dotColor,
-                  boxShadow: "0 0 8px rgba(0,0,0,0.3)",
-                  border: "2px solid white",
-                }}
-              />
-            )}
-            <strong style={{ color: "#111827" }}>{wkLabel}</strong>
-            <span>• {targetText}</span>
-          </span>
-        </div>
-
-        {/* value line */}
-        <div
-          style={{
-            fontSize: "1.125rem",
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "0.4rem",
-            color: inTarget ? "#059669" : "#dc2626",
-          }}
-        >
-          <span>{valuePct.toFixed(1)}%</span>
-          <span
-            style={{
-              fontSize: "1rem",
-              lineHeight: 1,
-              color: inTarget ? "#4f46e5" : "#dc2626",
-              fontWeight: 600,
-            }}
-          >
-            {inTarget ? "✓" : "✕"}
-          </span>
-        </div>
-      </div>
+        No data available.
+      </section>
     );
   }
 
-  // derive the values we show
-  const payrollPct = insights.payrollPct || 0;
-  const foodPct = insights.foodPct || 0;
-  const drinkPct = insights.drinkPct || 0;
-  const salesVsLastYearPct = insights.salesVsLastYearPct || 0;
+  // Destructure what we need from the snapshot
+  const {
+    wkLabel,
+    payrollPct,
+    foodPct,
+    drinkPct,
+    salesVsLastYearPct,
+    avgPayrollVar4w,
+  } = snapshot;
 
-  const payrollOk = payrollPct <= payrollTarget;
-  const foodOk = foodPct <= foodTarget;
-  const drinkOk = drinkPct <= drinkTarget;
-  const lastYearOk = salesVsLastYearPct >= 0;
+  // --- Traffic light dot colour logic using avgPayrollVar4w ---
+  // you said:
+  //   if avg < 1  => green
+  //   if 1 < avg < 2 => amber
+  //   if avg > 2 => red
+  // NOTE: we interpret "avg" as absolute value, because you said
+  // e.g. (-1.48%) should be amber (not green) if magnitude is in that band.
+  const magnitude = Math.abs(avgPayrollVar4w ?? 0);
+  let dotColor = "#10B981"; // green
+  if (magnitude >= 1 && magnitude < 2) {
+    dotColor = "#FACC15"; // amber/yellow
+  } else if (magnitude >= 2) {
+    dotColor = "#EF4444"; // red
+  }
 
+  // --- Helpers for rendering numeric values nicely ---
+  function pct(val) {
+    if (val === undefined || val === null || isNaN(val)) {
+      return "0.0%";
+    }
+    return `${Number(val).toFixed(1)}%`;
+  }
+
+  const payrollIsOk = payrollPct <= payrollTarget;
+  const foodIsOk = foodPct <= foodTarget;
+  const drinkIsOk = drinkPct <= drinkTarget;
+  const salesVsLyOk = (salesVsLastYearPct ?? 0) >= 0;
+
+  // --- Shared card styles ---
+  const cardBase = {
+    backgroundColor: "#fff",
+    borderRadius: "0.75rem",
+    boxShadow:
+      "0 24px 40px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)",
+    padding: "1rem 1.25rem",
+    flex: "1 1 200px",
+    minWidth: "200px",
+    fontFamily: "Inter, system-ui, sans-serif",
+  };
+
+  // header row inside each card
+  const labelRow = {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    fontSize: "0.75rem",
+    fontWeight: 500,
+    color: "#6b7280",
+    marginBottom: "0.25rem",
+    lineHeight: 1.2,
+    columnGap: "0.5rem",
+  };
+
+  const wkCluster = {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    flexWrap: "wrap",
+  };
+
+  // the dot
+  const dotStyle = {
+    width: "14px",
+    height: "14px",
+    borderRadius: "999px",
+    backgroundColor: dotColor,
+    boxShadow: "0 0 4px rgba(0,0,0,0.15)",
+    border: "2px solid white",
+    flexShrink: 0,
+  };
+
+  // green/red value styling
+  const goodValue = {
+    fontSize: "1rem",
+    fontWeight: 600,
+    color: "#10B981",
+    lineHeight: 1.2,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+  };
+
+  const badValue = {
+    fontSize: "1rem",
+    fontWeight: 600,
+    color: "#EF4444",
+    lineHeight: 1.2,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+  };
+
+  // --- Render ---
   return (
-    <div
+    <section
       style={{
-        display: "flex",
-        flexWrap: "wrap",
+        maxWidth: "1280px",
+        margin: "1rem auto 0",
+        display: "grid",
         gap: "1rem",
-        justifyContent: "center",
-        margin: "1rem auto",
-        maxWidth: "1100px",
-        paddingLeft: "1rem",
-        paddingRight: "1rem",
+        gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+        fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
-      <ComplianceCard
-        title="Payroll %"
-        valuePct={payrollPct}
-        targetText={`Target ≤ ${payrollTarget}%`}
-        inTarget={payrollOk}
-      />
+      {/* Payroll card */}
+      <div style={cardBase}>
+        <div style={labelRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Payroll %
+          </span>
 
-      <ComplianceCard
-        title="Food %"
-        valuePct={foodPct}
-        targetText={`Target ≤ ${foodTarget}%`}
-        inTarget={foodOk}
-      />
+          <div style={wkCluster}>
+            <span style={dotStyle} />
+            <span>
+              <strong>{wkLabel}</strong> • Target ≤ {payrollTarget}%
+            </span>
+          </div>
+        </div>
 
-      <ComplianceCard
-        title="Drink %"
-        valuePct={drinkPct}
-        targetText={`Target ≤ ${drinkTarget}%`}
-        inTarget={drinkOk}
-      />
+        <div style={payrollIsOk ? goodValue : badValue}>
+          <span>{pct(payrollPct)}</span>
+          <span>{payrollIsOk ? "✓" : "✕"}</span>
+        </div>
+      </div>
 
-      <ComplianceCard
-        title="Sales vs LY"
-        valuePct={salesVsLastYearPct}
-        targetText={`Target ≥ 0%`}
-        inTarget={lastYearOk}
-      />
-    </div>
+      {/* Food card */}
+      <div style={cardBase}>
+        <div style={labelRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Food %
+          </span>
+
+          <div style={wkCluster}>
+            <span>
+              <strong>{wkLabel}</strong> • Target ≤ {foodTarget}%
+            </span>
+          </div>
+        </div>
+
+        <div style={foodIsOk ? goodValue : badValue}>
+          <span>{pct(foodPct)}</span>
+          <span>{foodIsOk ? "✓" : "✕"}</span>
+        </div>
+      </div>
+
+      {/* Drink card */}
+      <div style={cardBase}>
+        <div style={labelRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Drink %
+          </span>
+
+          <div style={wkCluster}>
+            <span>
+              <strong>{wkLabel}</strong> • Target ≤ {drinkTarget}%
+            </span>
+          </div>
+        </div>
+
+        <div style={drinkIsOk ? goodValue : badValue}>
+          <span>{pct(drinkPct)}</span>
+          <span>{drinkIsOk ? "✓" : "✕"}</span>
+        </div>
+      </div>
+
+      {/* Sales vs LY card */}
+      <div style={cardBase}>
+        <div style={labelRow}>
+          <span style={{ fontWeight: 600, color: "#111827" }}>
+            Sales vs LY
+          </span>
+
+          <div style={wkCluster}>
+            <span>
+              <strong>{wkLabel}</strong> • Target ≥ 0%
+            </span>
+          </div>
+        </div>
+
+        <div style={salesVsLyOk ? goodValue : badValue}>
+          <span>{pct(salesVsLastYearPct)}</span>
+          <span>{salesVsLyOk ? "✓" : "✕"}</span>
+        </div>
+      </div>
+    </section>
   );
 }
