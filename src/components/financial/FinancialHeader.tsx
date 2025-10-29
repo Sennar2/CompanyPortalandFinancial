@@ -1,3 +1,4 @@
+// src/components/financial/FinancialHeader.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -21,7 +22,7 @@ export default function FinancialHeader() {
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
 
-  // grab auth + profile (same idea as the portal header)
+  // grab auth + profile (same idea as portal header)
   useEffect(() => {
     (async () => {
       try {
@@ -86,11 +87,10 @@ export default function FinancialHeader() {
           </Link>
         </div>
 
-        {/* Right side: admin pill (if admin), name/role, logout */}
+        {/* Right: admin pill, name/role, logout */}
         <div className="flex items-center gap-3 text-sm">
           {profileLoaded && profile ? (
             <>
-              {/* Admin Panel pill if admin and not already on /admin */}
               {profile.role === "admin" && pathname !== "/admin" && (
                 <Link
                   href="/admin"
@@ -100,7 +100,6 @@ export default function FinancialHeader() {
                 </Link>
               )}
 
-              {/* name + role */}
               <div className="text-right leading-tight hidden sm:block">
                 <div className="text-gray-900 font-medium text-[13px] truncate max-w-[140px]">
                   {profile.full_name || "User"}
@@ -110,7 +109,6 @@ export default function FinancialHeader() {
                 </div>
               </div>
 
-              {/* logout */}
               <button
                 onClick={handleLogout}
                 className="rounded-md bg-gray-900 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-black transition"
@@ -119,7 +117,6 @@ export default function FinancialHeader() {
               </button>
             </>
           ) : profileLoaded && !profile ? (
-            // not logged in
             <Link
               href="/login"
               className="rounded-md bg-blue-600 text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-blue-700 transition"
@@ -127,7 +124,6 @@ export default function FinancialHeader() {
               Sign in
             </Link>
           ) : (
-            // still loading
             <div className="h-[30px] w-[80px] bg-gray-200 rounded animate-pulse" />
           )}
         </div>
