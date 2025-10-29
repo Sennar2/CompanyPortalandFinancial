@@ -7,12 +7,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { CSVLink } from "react-csv";
 
 // Components we already have
-import InsightsBar from "@/components/financial/InsightsBar";
-import ComplianceBar from "@/components/financial/ComplianceBar";
-import RankingTable from "@/components/financial/RankingTable";
-import KPIBlock from "@/components/financial/KPIBlock";
-import ChartSection from "@/components/financial/ChartSection";
-import FinancialFooter from "@/components/financial/FinancialFooter";
+import InsightsBar from "../../components/financial/InsightsBar";
+import ComplianceBar from "../../components/financial/ComplianceBar";
+import RankingTable from "../../components/financial/RankingTable";
+import KPIBlock from "../../components/financial/KPIBlock";
+import ChartSection from "../../components/financial/ChartSection";
+import FinancialFooter from "../../components/financial/FinancialFooter";
 
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
