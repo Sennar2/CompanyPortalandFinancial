@@ -2,10 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../src/lib/supabaseClient';
-import ChartSection from '../../src/components/financial/ChartSection';
 
 // ─────────────────────────────
-// config / constants
+// CONFIG / CONSTANTS
 // ─────────────────────────────
 const API_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_API_KEY ||
@@ -50,13 +49,14 @@ const FOOD_TARGET = 12.5; // %
 const DRINK_TARGET = 5.5; // %
 
 // ─────────────────────────────
-// helpers
+// HELPERS
 // ─────────────────────────────
 function parseWeekNum(weekStr: string | undefined) {
   const num = parseInt(String(weekStr || '').replace(/[^\d]/g, ''), 10);
   return isNaN(num) ? 0 : num;
 }
 
+// ISO-ish current week number, clamped to 52
 function getISOWeek(date = new Date()) {
   const d = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
@@ -66,7 +66,6 @@ function getISOWeek(date = new Date()) {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const raw = ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7;
   const weekNo = Math.ceil(raw);
-  // clamp at 52 so late-December doesn't show W53 and break your mapping
   return weekNo > 52 ? 52 : weekNo;
 }
 
@@ -74,7 +73,6 @@ function getCurrentWeekLabel() {
   return `W${getISOWeek(new Date())}`;
 }
 
-// take raw sheet values -> array of row objects
 function parseSheetValues(values: any[][] | undefined) {
   if (!values || values.length < 2) return [];
   const [headers, ...rows] = values;
@@ -110,7 +108,6 @@ async function fetchTab(tabName: string) {
   return parseSheetValues(json.values);
 }
 
-// merge multiple site tabs (brand rollup) by Week
 function rollupByWeek(rowsArray: any[]) {
   if (!rowsArray.length) return [];
   const grouped: Record<string, any[]> = {};
@@ -143,7 +140,6 @@ function rollupByWeek(rowsArray: any[]) {
   return merged;
 }
 
-// compute "insights" for the last completed week
 function computeInsightsBundle(rows: any[]) {
   if (!rows || rows.length === 0) return null;
 
@@ -187,7 +183,7 @@ function computeInsightsBundle(rows: any[]) {
   const weekNumWeUse = latestRow.__weekNum;
   const wkLabel = latestRow.Week || `W${weekNumWeUse}`;
 
-  // we keep 4-week avg logic for possible future display
+  // average payroll variance 4w — we keep it around, even if not displayed right now
   const windowWeeks = [
     weekNumWeUse,
     weekNumWeUse - 1,
@@ -225,9 +221,7 @@ function computeInsightsBundle(rows: any[]) {
       : 0;
 
   const foodPct =
-    salesActual !== 0
-      ? (latestRow.Food_Actual / salesActual) * 100
-      : 0;
+    salesActual !== 0 ? (latestRow.Food_Actual / salesActual) * 100 : 0;
 
   const drinkPct =
     salesActual !== 0
@@ -264,7 +258,7 @@ function formatCurrency(val: number | undefined | null) {
   );
 }
 
-// tiny ✓ / ✗ helper
+// ✓ / ✗ helper
 function TargetStatus({ isGood }: { isGood: boolean }) {
   return (
     <span
@@ -278,7 +272,7 @@ function TargetStatus({ isGood }: { isGood: boolean }) {
   );
 }
 
-// hero row (Current Week + Last Week Results)
+// Hero row cards (Current Week + Last Week Results)
 function InsightsHero({
   currentWeekNow,
   insights,
@@ -292,7 +286,7 @@ function InsightsHero({
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {/* Current Week card */}
+      {/* Current Week */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="text-xs text-gray-500 font-medium mb-4">
           Current Week
@@ -305,7 +299,7 @@ function InsightsHero({
         </p>
       </div>
 
-      {/* Last Week Results card */}
+      {/* Last Week Results */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col justify-between">
         <div className="flex items-start justify-between">
           <div className="text-xs text-gray-500 font-medium">
@@ -348,7 +342,7 @@ function InsightsHero({
   );
 }
 
-// small KPI cards row
+// KPI cards row
 function MetricCard({
   label,
   weekLabel,
@@ -389,7 +383,7 @@ function MetricCard({
   );
 }
 
-// ranking table
+// Ranking table
 function RankingTable({
   rankingData,
   payrollTarget,
@@ -498,7 +492,7 @@ function RankingTable({
 // PAGE COMPONENT
 // ─────────────────────────────
 export default function FinancialPage() {
-  // auth
+  // auth state
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -507,9 +501,9 @@ export default function FinancialPage() {
   const [allowedLocations, setAllowedLocations] = useState<string[]>([]);
   const [initialLocation, setInitialLocation] = useState('');
   const [location, setLocation] = useState('');
-  const [period, setPeriod] = useState('Week');
+  const [period, setPeriod] = useState('Week'); // still here for future charts
 
-  // sheet data
+  // sheet rows
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [fetchError, setFetchError] = useState('');
@@ -519,7 +513,7 @@ export default function FinancialPage() {
 
   const currentWeekNow = getCurrentWeekLabel();
 
-  // session listener
+  // watch auth session
   useEffect(() => {
     let sub: any;
     async function init() {
@@ -574,8 +568,8 @@ export default function FinancialPage() {
       setProfile(data);
 
       const roleLower = (data.role || '').toLowerCase();
-
       let locs: string[];
+
       if (roleLower === 'admin' || roleLower === 'operation') {
         locs = [
           'GroupOverview',
@@ -602,14 +596,14 @@ export default function FinancialPage() {
     await supabase.auth.signOut();
   }
 
-  // sync initial location
+  // sync location once we know allowed
   useEffect(() => {
     if (!location && initialLocation) {
       setLocation(initialLocation);
     }
   }, [initialLocation, location]);
 
-  // WEEK→PERIOD/QUARTER LUT
+  // build week→period→quarter lookup
   const WEEK_TO_PERIOD_QUARTER = useMemo(() => {
     return Array.from({ length: 52 }, (_, i) => {
       const w = i + 1;
@@ -632,7 +626,7 @@ export default function FinancialPage() {
     });
   }, []);
 
-  // merge rows with Period / Quarter columns
+  // attach Period / Quarter to rawRows
   const mergedRows = useMemo(() => {
     return rawRows.map((item) => {
       const w = String(item.Week || '').trim();
@@ -645,47 +639,7 @@ export default function FinancialPage() {
     });
   }, [rawRows, WEEK_TO_PERIOD_QUARTER]);
 
-  // group rows for Period / Quarter view
-  function groupMergedRowsBy(bucketKey: 'Period' | 'Quarter') {
-    if (!mergedRows.length) return [];
-
-    const grouped = mergedRows.reduce((acc, row) => {
-      const key = (row as any)[bucketKey];
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(row);
-      return acc;
-    }, {} as Record<string, any[]>);
-
-    const numericKeys = Object.keys(mergedRows[0]).filter(
-      (k) => typeof (mergedRows[0] as any)[k] === 'number'
-    );
-
-    return Object.entries(grouped).map(([label, rows]) => {
-      const rowArr = rows as any[];
-      const sums: Record<string, number> = {};
-      numericKeys.forEach((col) => {
-        sums[col] = rowArr.reduce(
-          (total, r: any) => total + (r[col] || 0),
-          0
-        );
-      });
-      return {
-        Week: label, // reusing "Week" key so ChartSection x-axis still prints nicely
-        ...sums,
-      };
-    });
-  }
-
-  // final chart data
-  const filteredData = useMemo(() => {
-    if (!mergedRows.length) return [];
-    if (period === 'Week') return mergedRows;
-    if (period === 'Period') return groupMergedRowsBy('Period');
-    return groupMergedRowsBy('Quarter');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergedRows, period]);
-
-  // load sheet rows for selected location/brand
+  // load data for selected location / brand / group
   useEffect(() => {
     async function load() {
       if (!location) return;
@@ -718,16 +672,17 @@ export default function FinancialPage() {
     load();
   }, [location]);
 
-  // compute snapshot insights
+  // compute insights (for hero + KPI cards)
   const insights = useMemo(
     () => computeInsightsBundle(mergedRows),
     [mergedRows]
   );
 
-  // ranking table build
+  // build ranking table from store tabs (admin/operation only)
   useEffect(() => {
     async function buildRanking() {
-      const roleLower = (profile?.role || '').toLowerCase();
+      const roleLower =
+        profile && profile.role ? profile.role.toLowerCase() : '';
       if (roleLower !== 'admin' && roleLower !== 'operation') {
         setRankingData([]);
         return;
@@ -821,7 +776,7 @@ export default function FinancialPage() {
   }, [profile]);
 
   // ─────────────────────────────
-  // guards / fallback UIs
+  // PAGE GUARDS
   // ─────────────────────────────
   if (authLoading) {
     return (
@@ -866,10 +821,10 @@ export default function FinancialPage() {
   // ─────────────────────────────
   return (
     <main className="bg-gray-50 min-h-screen text-gray-900 font-[system-ui]">
-      {/* FINANCIAL PERFORMANCE HEADER + FILTERS */}
+      {/* TOP BLOCK: title + filters (centered under company header) */}
       <section className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* title + subtitle */}
+          {/* Title + subtitle */}
           <div className="text-center mb-6">
             <div className="text-base font-semibold text-gray-900">
               Financial Performance
@@ -879,7 +834,7 @@ export default function FinancialPage() {
             </div>
           </div>
 
-          {/* filters row */}
+          {/* Filters row */}
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-center gap-6">
             {/* Location */}
             <div className="flex flex-col text-left">
@@ -897,7 +852,7 @@ export default function FinancialPage() {
               </select>
             </div>
 
-            {/* View / Period */}
+            {/* View (period) */}
             <div className="flex flex-col text-left">
               <label className="text-[11px] font-semibold text-gray-600 tracking-wide uppercase mb-1">
                 View
@@ -918,14 +873,14 @@ export default function FinancialPage() {
 
       {/* BODY CONTENT */}
       <section className="max-w-7xl mx-auto px-4 py-8 space-y-12">
-        {/* HERO INSIGHTS */}
+        {/* HERO INSIGHTS (current week + last week results cards) */}
         <InsightsHero
-          currentWeekNow={getCurrentWeekLabel()}
+          currentWeekNow={currentWeekNow}
           insights={insights}
           payrollTarget={PAYROLL_TARGET}
         />
 
-        {/* KPI row */}
+        {/* KPI ROW */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* Payroll % */}
           <MetricCard
@@ -980,13 +935,11 @@ export default function FinancialPage() {
           </div>
         </div>
 
-        {/* CHARTS SECTION */}
-        <div className="mt-4">
-          <ChartSection data={filteredData} period={period} />
-        </div>
+        {/* GAP BETWEEN KPI ROW AND RANKING */}
+        <div className="h-8" />
 
         {/* RANKING TABLE */}
-        <div className="mt-8">
+        <div>
           {loadingData && (
             <p className="text-center text-gray-500 text-sm">
               Loading data…
@@ -1009,7 +962,7 @@ export default function FinancialPage() {
           )}
         </div>
 
-        {/* sign out at bottom (mobile safety net) */}
+        {/* backup logout at bottom (esp. mobile) */}
         <div className="text-center pt-10 pb-16">
           <button
             onClick={handleSignOut}
