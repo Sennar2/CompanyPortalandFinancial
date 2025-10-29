@@ -5,11 +5,23 @@ import { supabase } from '@/lib/supabaseClient'
 import { useParams } from 'next/navigation'
 
 export default function CategoryPage() {
-  const { brand, location, category } = useParams()
+  // ✅ Tell TS exactly what params we expect in this route
+  const rawParams = useParams() as {
+    brand?: string
+    location?: string
+    category?: string
+  }
+
+  // ✅ Destructure with safe fallbacks so `undefined` won't explode in .eq()
+  const brand = rawParams.brand ?? ''
+  const location = rawParams.location ?? ''
+  const category = rawParams.category ?? ''
+
   const [resources, setResources] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // don't query until all 3 are non-empty
     if (!brand || !location || !category) return
 
     const fetchData = async () => {
@@ -20,8 +32,11 @@ export default function CategoryPage() {
         .eq('location', location)
         .eq('category', category)
 
-      if (error) setError(error.message)
-      else setResources(data || [])
+      if (error) {
+        setError(error.message)
+      } else {
+        setResources(data || [])
+      }
     }
 
     fetchData()
@@ -40,7 +55,10 @@ export default function CategoryPage() {
       ) : (
         <div className="grid gap-4">
           {resources.map((r) => (
-            <div key={r.id} className="bg-white border p-4 rounded shadow">
+            <div
+              key={r.id}
+              className="bg-white border p-4 rounded shadow"
+            >
               <h2 className="font-medium">{r.title}</h2>
               <a
                 href={r.link}
